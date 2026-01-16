@@ -5,6 +5,7 @@ use crate::parser::Sexp;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ty {
     Named(String),
+    Vec(Box<Ty>),
     Unknown,
 }
 
@@ -12,6 +13,7 @@ impl Ty {
     pub fn rust(&self) -> String {
         match self {
             Ty::Named(s) => s.clone(),
+            Ty::Vec(inner) => format!("Vec<{}>", inner.rust()),
             Ty::Unknown => "_".to_string(),
         }
     }
@@ -43,6 +45,11 @@ pub enum Expr {
     Int(i64, Span),
     Float(f64, Span),
     Var(String, Span),
+    VecLit {
+        elems: Vec<Expr>,
+        span: Span,
+        ann: Option<Ty>,
+    },
     Field {
         base: Box<Expr>,
         field: String,
@@ -61,6 +68,7 @@ impl Expr {
             Expr::Int(_, s) => s.clone(),
             Expr::Float(_, s) => s.clone(),
             Expr::Var(_, s) => s.clone(),
+            Expr::VecLit { span, .. } => span.clone(),
             Expr::Field { span, .. } => span.clone(),
             Expr::Call { span, .. } => span.clone(),
         }
@@ -89,6 +97,10 @@ fn atom_sym(se: &Sexp) -> Option<(String, Span)> {
 }
 
 fn parse_type_from_sym(s: &str) -> Ty {
+    if let Some(inner) = s.strip_prefix("Vec<").and_then(|rest| rest.strip_suffix('>')) {
+        let inner_ty = parse_type_from_sym(inner);
+        return Ty::Vec(Box::new(inner_ty));
+    }
     Ty::Named(s.to_string())
 }
 
@@ -194,8 +206,23 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                     Diag::new("empty list is not a valid expression").with_span(span.clone())
                 );
             }
-            let (op, _) = atom_sym(&items[0])
+            let (op, op_span) = atom_sym(&items[0])
                 .ok_or_else(|| Diag::new("call head must be a symbol").with_span(se_span(&items[0])))?;
+            let head_ty = parse_type_from_sym(&op);
+            if let Ty::Vec(_) = head_ty {
+                let mut elems = Vec::new();
+                for a in items.iter().skip(1) {
+                    elems.push(parse_expr(a)?);
+                }
+                return Ok(Expr::VecLit {
+                    elems,
+                    span: Span {
+                        start: op_span.start,
+                        end: span.end.clone(),
+                    },
+                    ann: Some(head_ty),
+                });
+            }
             let mut args = Vec::new();
             for a in items.iter().skip(1) {
                 args.push(parse_expr(a)?);
@@ -206,9 +233,17 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                 span: span.clone(),
             })
         }
-        Sexp::Brack(_, span) => Err(
-            Diag::new("unexpected [..] where expression expected").with_span(span.clone()),
-        ),
+        Sexp::Brack(items, span) => {
+            let mut elems = Vec::new();
+            for a in items {
+                elems.push(parse_expr(a)?);
+            }
+            Ok(Expr::VecLit {
+                elems,
+                span: span.clone(),
+                ann: None,
+            })
+        }
     }
 }
 

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::{Expr, FnDef, StructDef, Top, Ty};
 use crate::diag::{Diag, DslResult, Span};
-use crate::typed::{CastHint, TypedExpr, TypedFn};
+use crate::typed::{CastHint, SpanKey, TypedExpr, TypedFn};
 
 #[derive(Debug, Clone)]
 pub struct TypeEnv {
@@ -109,25 +109,54 @@ fn infer_param_types(env: &TypeEnv, f: &FnDef) -> DslResult<BTreeMap<String, Ty>
             );
         }
         let cur = param_tys.get(&p).cloned().unwrap_or(Ty::Unknown);
-        if let Ty::Named(_) = cur {
-            let ty_name = match &cur {
-                Ty::Named(s) => s.clone(),
-                _ => unreachable!(),
-            };
-            let sd = env.structs.get(&ty_name).ok_or_else(|| {
-                Diag::new(format!("unknown type '{}'", ty_name))
-                    .with_span(param_spans[&p].clone())
-            })?;
-            for fld in &fields {
-                if !sd.fields.iter().any(|ff| ff.name == *fld) {
-                    return Err(Diag::new(format!(
-                        "type '{}' has no field '{}'",
-                        ty_name, fld
-                    ))
-                    .with_span(param_spans[&p].clone()));
+        match &cur {
+            Ty::Named(ty_name) => {
+                let sd = env.structs.get(ty_name).ok_or_else(|| {
+                    Diag::new(format!("unknown type '{}'", ty_name))
+                        .with_span(param_spans[&p].clone())
+                })?;
+                for fld in &fields {
+                    if !sd.fields.iter().any(|ff| ff.name == *fld) {
+                        return Err(Diag::new(format!(
+                            "type '{}' has no field '{}'",
+                            ty_name, fld
+                        ))
+                        .with_span(param_spans[&p].clone()));
+                    }
                 }
+                continue;
             }
-            continue;
+            Ty::Vec(inner) => {
+                let ty_name = match inner.as_ref() {
+                    Ty::Named(n) => n.clone(),
+                    Ty::Unknown => {
+                        return Err(Diag::new("cannot access field on unknown vector type")
+                            .with_span(param_spans[&p].clone()))
+                    }
+                    other => {
+                        return Err(Diag::new(format!(
+                            "cannot access field on non-struct vector type '{}'",
+                            other.rust()
+                        ))
+                        .with_span(param_spans[&p].clone()))
+                    }
+                };
+                let sd = env.structs.get(&ty_name).ok_or_else(|| {
+                    Diag::new(format!("unknown type '{}'", ty_name))
+                        .with_span(param_spans[&p].clone())
+                })?;
+                for fld in &fields {
+                    if !sd.fields.iter().any(|ff| ff.name == *fld) {
+                        return Err(Diag::new(format!(
+                            "type '{}' has no field '{}'",
+                            ty_name, fld
+                        ))
+                        .with_span(param_spans[&p].clone()));
+                    }
+                }
+                continue;
+            }
+            Ty::Unknown => {}
         }
 
         let mut candidates = Vec::new();
@@ -182,32 +211,121 @@ fn fmt_set(s: &BTreeSet<String>) -> String {
 
 fn infer_expr_type(env: &TypeEnv, vars: &BTreeMap<String, Ty>, e: &Expr) -> DslResult<TypedExpr> {
     match e {
-        Expr::Int(_, _sp) => Ok(TypedExpr {
-            expr: e.clone(),
-            ty: Ty::Named("i32".to_string()),
-            casts: vec![],
-        }),
-        Expr::Float(_, _sp) => Ok(TypedExpr {
-            expr: e.clone(),
-            ty: Ty::Named("f64".to_string()),
-            casts: vec![],
-        }),
+        Expr::Int(_, sp) => {
+            let ty = Ty::Named("i32".to_string());
+            let mut types = BTreeMap::new();
+            types.insert(SpanKey::new(sp), ty.clone());
+            Ok(TypedExpr {
+                expr: e.clone(),
+                ty,
+                casts: vec![],
+                types,
+            })
+        }
+        Expr::Float(_, sp) => {
+            let ty = Ty::Named("f64".to_string());
+            let mut types = BTreeMap::new();
+            types.insert(SpanKey::new(sp), ty.clone());
+            Ok(TypedExpr {
+                expr: e.clone(),
+                ty,
+                casts: vec![],
+                types,
+            })
+        }
         Expr::Var(v, sp) => {
             let ty = vars
                 .get(v)
                 .cloned()
                 .ok_or_else(|| Diag::new(format!("unknown variable '{}'", v)).with_span(sp.clone()))?;
+            let mut types = BTreeMap::new();
+            types.insert(SpanKey::new(sp), ty.clone());
             Ok(TypedExpr {
                 expr: e.clone(),
                 ty,
                 casts: vec![],
+                types,
+            })
+        }
+        Expr::VecLit { elems, span, ann } => {
+            let mut casts = Vec::new();
+            let mut types = BTreeMap::new();
+            let mut elem_tys = Vec::new();
+            for el in elems {
+                let te = infer_expr_type(env, vars, el)?;
+                casts.extend(te.casts.clone());
+                types.extend(te.types);
+                elem_tys.push((te.ty, el.span()));
+            }
+
+            let elem_ty = match ann {
+                Some(Ty::Vec(inner)) => {
+                    for (ty, el_sp) in &elem_tys {
+                        if ty != inner.as_ref() {
+                            return Err(Diag::new(format!(
+                                "vector element type mismatch: expected '{}', got '{}'",
+                                inner.rust(),
+                                ty.rust()
+                            ))
+                            .with_span(el_sp.clone()));
+                        }
+                    }
+                    *inner.clone()
+                }
+                Some(_) => {
+                    return Err(Diag::new("vector literal must use Vec<T> annotation")
+                        .with_span(span.clone()));
+                }
+                None => {
+                    if elem_tys.is_empty() {
+                        return Err(Diag::new(
+                            "cannot infer vector element type from empty literal; add Vec<T>",
+                        )
+                        .with_span(span.clone()));
+                    }
+                    let (first_ty, _) = &elem_tys[0];
+                    for (ty, el_sp) in &elem_tys[1..] {
+                        if ty != first_ty {
+                            return Err(Diag::new(format!(
+                                "vector element type mismatch: expected '{}', got '{}'",
+                                first_ty.rust(),
+                                ty.rust()
+                            ))
+                            .with_span(el_sp.clone()));
+                        }
+                    }
+                    first_ty.clone()
+                }
+            };
+
+            let ty = Ty::Vec(Box::new(elem_ty));
+            types.insert(SpanKey::new(span), ty.clone());
+            Ok(TypedExpr {
+                expr: e.clone(),
+                ty,
+                casts,
+                types,
             })
         }
         Expr::Field { base, field, span } => {
             let tb = infer_expr_type(env, vars, base)?;
             let base_ty = tb.ty.clone();
-            let struct_name = match base_ty {
-                Ty::Named(n) => n,
+            let (struct_name, is_vec) = match base_ty {
+                Ty::Named(n) => (n, false),
+                Ty::Vec(inner) => match *inner {
+                    Ty::Named(n) => (n, true),
+                    Ty::Unknown => {
+                        return Err(Diag::new("cannot access field on unknown type")
+                            .with_span(span.clone()))
+                    }
+                    other => {
+                        return Err(Diag::new(format!(
+                            "cannot access field on non-struct vector type '{}'",
+                            other.rust()
+                        ))
+                        .with_span(span.clone()))
+                    }
+                },
                 Ty::Unknown => {
                     return Err(
                         Diag::new("cannot access field on unknown type").with_span(span.clone()),
@@ -226,18 +344,29 @@ fn infer_expr_type(env: &TypeEnv, vars: &BTreeMap<String, Ty>, e: &Expr) -> DslR
                     Diag::new(format!("type '{}' has no field '{}'", struct_name, field))
                         .with_span(span.clone())
                 })?;
+
+            let ty = if is_vec {
+                Ty::Vec(Box::new(f.ty.clone()))
+            } else {
+                f.ty.clone()
+            };
+            let mut types = tb.types;
+            types.insert(SpanKey::new(span), ty.clone());
             Ok(TypedExpr {
                 expr: e.clone(),
-                ty: f.ty.clone(),
+                ty,
                 casts: tb.casts,
+                types,
             })
         }
         Expr::Call { op, args, span } => {
             let mut targs = Vec::new();
             let mut casts = Vec::new();
+            let mut types = BTreeMap::new();
             for a in args {
                 let ta = infer_expr_type(env, vars, a)?;
                 casts.extend(ta.casts.clone());
+                types.extend(ta.types.clone());
                 targs.push(ta);
             }
 
@@ -254,10 +383,12 @@ fn infer_expr_type(env: &TypeEnv, vars: &BTreeMap<String, Ty>, e: &Expr) -> DslR
                         numeric_binop(&a.ty, &b.ty, &a.expr.span(), &b.expr.span())
                             .map_err(|m| Diag::new(m).with_span(span.clone()))?;
                     casts.extend(extra_casts);
+                    types.insert(SpanKey::new(span), out_ty.clone());
                     Ok(TypedExpr {
                         expr: e.clone(),
                         ty: out_ty,
                         casts,
+                        types,
                     })
                 }
                 _ => Err(Diag::new(format!("unknown operator '{}'", op)).with_span(span.clone())),
@@ -267,6 +398,47 @@ fn infer_expr_type(env: &TypeEnv, vars: &BTreeMap<String, Ty>, e: &Expr) -> DslR
 }
 
 fn numeric_binop(a: &Ty, b: &Ty, a_sp: &Span, b_sp: &Span) -> Result<(Ty, Vec<CastHint>), String> {
+    let (vec_side, vec_elem, scalar) = match (a, b) {
+        (Ty::Vec(inner), other) => (Some(true), inner.as_ref(), other),
+        (other, Ty::Vec(inner)) => (Some(false), inner.as_ref(), other),
+        _ => (None, &Ty::Unknown, &Ty::Unknown),
+    };
+
+    if let Some(_vec_left) = vec_side {
+        if let Ty::Vec(_) = scalar {
+            return Err("vector-vector numeric ops are not supported".to_string());
+        }
+        let elem_ty = vec_elem;
+        if elem_ty != scalar {
+            return Err(format!(
+                "vector-scalar numeric ops require matching element type, got '{}' and '{}'",
+                elem_ty.rust(),
+                scalar.rust()
+            ));
+        }
+        let out_elem = elem_ty.clone();
+        let out_vec = Ty::Vec(Box::new(out_elem));
+        return Ok((out_vec, vec![]));
+    }
+
+    let out = numeric_scalar_binop(a, b)?;
+    let mut casts = Vec::new();
+    if out.rust() != a.rust() && is_numeric(a) {
+        casts.push(CastHint {
+            span: a_sp.clone(),
+            target: out.clone(),
+        });
+    }
+    if out.rust() != b.rust() && is_numeric(b) {
+        casts.push(CastHint {
+            span: b_sp.clone(),
+            target: out.clone(),
+        });
+    }
+    Ok((out, casts))
+}
+
+fn numeric_scalar_binop(a: &Ty, b: &Ty) -> Result<Ty, String> {
     let ai = a == &Ty::Named("i32".to_string())
         || a == &Ty::Named("i64".to_string())
         || a == &Ty::Named("u32".to_string())
@@ -287,38 +459,25 @@ fn numeric_binop(a: &Ty, b: &Ty, a_sp: &Span, b_sp: &Span) -> Result<(Ty, Vec<Ca
     }
 
     if a == &Ty::Named("f64".to_string()) || b == &Ty::Named("f64".to_string()) {
-        let mut casts = Vec::new();
-        if ai && a != &Ty::Named("f64".to_string()) {
-            casts.push(CastHint {
-                span: a_sp.clone(),
-                target: Ty::Named("f64".to_string()),
-            });
-        }
-        if bi && b != &Ty::Named("f64".to_string()) {
-            casts.push(CastHint {
-                span: b_sp.clone(),
-                target: Ty::Named("f64".to_string()),
-            });
-        }
-        return Ok((Ty::Named("f64".to_string()), casts));
+        return Ok(Ty::Named("f64".to_string()));
     }
 
     if af || bf {
-        let mut casts = Vec::new();
-        if ai && a != &Ty::Named("f32".to_string()) {
-            casts.push(CastHint {
-                span: a_sp.clone(),
-                target: Ty::Named("f32".to_string()),
-            });
-        }
-        if bi && b != &Ty::Named("f32".to_string()) {
-            casts.push(CastHint {
-                span: b_sp.clone(),
-                target: Ty::Named("f32".to_string()),
-            });
-        }
-        return Ok((Ty::Named("f32".to_string()), casts));
+        return Ok(Ty::Named("f32".to_string()));
     }
 
-    Ok((Ty::Named("i32".to_string()), vec![]))
+    Ok(Ty::Named("i32".to_string()))
+}
+
+fn is_numeric(t: &Ty) -> bool {
+    matches!(
+        t,
+        Ty::Named(s)
+        if s == "i32"
+            || s == "i64"
+            || s == "u32"
+            || s == "u64"
+            || s == "f32"
+            || s == "f64"
+    )
 }

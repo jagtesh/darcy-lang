@@ -1,6 +1,8 @@
-use crate::ast::{Expr, Top};
+use std::collections::BTreeMap;
+
+use crate::ast::{Expr, Top, Ty};
 use crate::diag::{Diag, DslResult, Span};
-use crate::typed::TypedFn;
+use crate::typed::{SpanKey, TypedFn};
 use crate::PipelineOutput;
 
 pub fn lower_program(pipeline: &PipelineOutput) -> DslResult<String> {
@@ -32,7 +34,7 @@ pub fn lower_program(pipeline: &PipelineOutput) -> DslResult<String> {
             emit_params(&mut out, fd, typed)?;
             out.push_str(&format!(") -> {} {{\n", typed.body.ty.rust()));
             out.push_str("    ");
-            out.push_str(&lower_expr(&fd.body, &typed.body.casts));
+            out.push_str(&lower_expr(&fd.body, &typed.body.casts, &typed.body.types));
             out.push_str("\n}\n\n");
         }
     }
@@ -55,7 +57,11 @@ fn emit_params(out: &mut String, fd: &crate::ast::FnDef, typed: &TypedFn) -> Dsl
     Ok(())
 }
 
-fn lower_expr(e: &Expr, casts: &[crate::typed::CastHint]) -> String {
+fn lower_expr(
+    e: &Expr,
+    casts: &[crate::typed::CastHint],
+    types: &BTreeMap<SpanKey, Ty>,
+) -> String {
     let mut inner = match e {
         Expr::Int(v, _) => v.to_string(),
         Expr::Float(v, _) => {
@@ -66,14 +72,48 @@ fn lower_expr(e: &Expr, casts: &[crate::typed::CastHint]) -> String {
             s
         }
         Expr::Var(v, _) => v.clone(),
-        Expr::Field { base, field, .. } => format!("{}.{}", lower_expr(base, casts), field),
-        Expr::Call { op, args, .. } => {
+        Expr::VecLit { elems, ann, .. } => {
+            if elems.is_empty() {
+                if let Some(Ty::Vec(inner)) = ann {
+                    format!("Vec::<{}>::new()", inner.rust())
+                } else {
+                    "vec![]".to_string()
+                }
+            } else {
+                let rendered: Vec<String> = elems
+                    .iter()
+                    .map(|el| lower_expr(el, casts, types))
+                    .collect();
+                format!("vec![{}]", rendered.join(", "))
+            }
+        }
+        Expr::Field { base, field, span: _ } => {
+            let base_ty = expr_ty(types, &base.span());
+            if let Some(Ty::Vec(_)) = base_ty {
+                let base_expr = lower_expr(base, casts, types);
+                format!(
+                    "({}).into_iter().map(|__x| __x.{}).collect::<Vec<_>>()",
+                    base_expr, field
+                )
+            } else {
+                format!("{}.{}", lower_expr(base, casts, types), field)
+            }
+        }
+        Expr::Call { op, args, span: _ } => {
             if args.len() == 2 && ["+", "-", "*", "/"].contains(&op.as_str()) {
+                let left_ty = expr_ty(types, &args[0].span());
+                let right_ty = expr_ty(types, &args[1].span());
+                if let (Some(Ty::Vec(_)), Some(right_ty)) = (left_ty.clone(), right_ty.clone()) {
+                    return vec_scalar_binop(op, &args[0], &args[1], casts, types, true, &right_ty);
+                }
+                if let (Some(left_ty), Some(Ty::Vec(_))) = (left_ty.clone(), right_ty.clone()) {
+                    return vec_scalar_binop(op, &args[0], &args[1], casts, types, false, &left_ty);
+                }
                 format!(
                     "({} {} {})",
-                    lower_expr(&args[0], casts),
+                    lower_expr(&args[0], casts, types),
                     op,
-                    lower_expr(&args[1], casts)
+                    lower_expr(&args[1], casts, types)
                 )
             } else {
                 format!("/* unsupported call {} */", op)
@@ -92,4 +132,31 @@ fn lower_expr(e: &Expr, casts: &[crate::typed::CastHint]) -> String {
 
 fn spans_eq(a: &Span, b: &Span) -> bool {
     a.start.byte == b.start.byte && a.end.byte == b.end.byte
+}
+
+fn expr_ty(types: &BTreeMap<SpanKey, Ty>, span: &Span) -> Option<Ty> {
+    types.get(&SpanKey::new(span)).cloned()
+}
+
+fn vec_scalar_binop(
+    op: &str,
+    left: &Expr,
+    right: &Expr,
+    casts: &[crate::typed::CastHint],
+    types: &BTreeMap<SpanKey, Ty>,
+    vec_on_left: bool,
+    scalar_ty: &Ty,
+) -> String {
+    let vec_expr = if vec_on_left { left } else { right };
+    let scalar_expr = if vec_on_left { right } else { left };
+    let vec_render = lower_expr(vec_expr, casts, types);
+    let scalar_render = lower_expr(scalar_expr, casts, types);
+    let scalar = match scalar_ty {
+        Ty::Named(_) => scalar_render,
+        _ => scalar_render,
+    };
+    format!(
+        "({}).into_iter().map(|__x| __x {} {}).collect::<Vec<_>>()",
+        vec_render, op, scalar
+    )
 }
