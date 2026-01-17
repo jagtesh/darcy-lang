@@ -371,6 +371,50 @@ fn infer_expr_type(env: &TypeEnv, vars: &BTreeMap<String, Ty>, e: &Expr) -> DslR
             }
 
             match op.as_str() {
+                "print" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("'print' expects 1 argument").with_span(span.clone()));
+                    }
+                    let out_ty = Ty::Named("()".to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(TypedExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                _ if env.structs.contains_key(op) => {
+                    let sd = env.structs.get(op).unwrap();
+                    if targs.len() != sd.fields.len() {
+                        return Err(Diag::new(format!(
+                            "struct '{}' expects {} fields",
+                            op,
+                            sd.fields.len()
+                        ))
+                        .with_span(span.clone()));
+                    }
+                    for (idx, (arg, field)) in targs.iter().zip(sd.fields.iter()).enumerate() {
+                        if arg.ty != field.ty {
+                            return Err(Diag::new(format!(
+                                "struct '{}' field '{}' expects '{}', got '{}'",
+                                op,
+                                field.name,
+                                field.ty.rust(),
+                                arg.ty.rust()
+                            ))
+                            .with_span(args[idx].span()));
+                        }
+                    }
+                    let out_ty = Ty::Named(op.to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(TypedExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
                 "+" | "-" | "*" | "/" => {
                     if targs.len() != 2 {
                         return Err(
