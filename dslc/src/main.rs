@@ -6,7 +6,7 @@ use std::process::Command;
 use dslc::{compile_with_modules, render_diag};
 
 fn main() {
-    let mut args = env::args().skip(1).collect::<Vec<_>>();
+    let args = env::args().skip(1).collect::<Vec<_>>();
     if args.is_empty() || args[0] == "-h" || args[0] == "--help" {
         eprintln!(
             "dslc (MVP)\n\nUsage:\n  dslc [--lib <dir>] <input.dsl>\n  dslc [--lib <dir>] run <input.dsl>\n\nOptions:\n  --lib, -L <dir>   Add a module search path (repeatable)\n\nOutputs Rust to stdout, or compiles and runs with 'run'.\n"

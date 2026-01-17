@@ -1,4 +1,6 @@
-use dslc::compile;
+use std::path::PathBuf;
+
+use dslc::{compile, compile_with_modules};
 
 #[test]
 fn hashmap_literal_lowers() {
@@ -27,4 +29,12 @@ fn hashmap_empty_with_annotation() {
     let src = "(defn main [] (core.hashmap/new<string,i32>))";
     let out = compile(src).expect("compile ok");
     assert!(out.contains("HashMap::new"), "{}", out);
+}
+
+#[test]
+fn hashmap_alias_new_lowers() {
+    let root = PathBuf::from("main.dsl");
+    let src = "(use \"core/hashmap\" :as hm) (defn main [] (hm/new (\"a\" 1)))";
+    let out = compile_with_modules(&root, src, &[]).expect("compile ok");
+    assert!(out.contains("HashMap"), "{}", out);
 }

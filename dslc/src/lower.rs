@@ -151,6 +151,7 @@ fn lower_expr(
             let lit = format!("{:?}", s);
             format!("String::from({})", lit)
         }
+        Expr::Pair { .. } => "/* invalid pair */".to_string(),
         Expr::Var(v, _) => v.clone(),
         Expr::MapLit { kind, entries, .. } => {
             let map_ty = match kind {
@@ -260,6 +261,31 @@ fn lower_expr(
                     "println!(\"{{:?}}\", {})",
                     lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
                 );
+            }
+            if op == "core.hashmap/new" || op == "core.btreemap/new" {
+                let map_ty = if op == "core.hashmap/new" {
+                    "std::collections::HashMap"
+                } else {
+                    "std::collections::BTreeMap"
+                };
+                if args.is_empty() {
+                    return format!("{}::new()", map_ty);
+                }
+                let mut parts = Vec::new();
+                for entry in args {
+                    if let Expr::Pair { key, val, .. } = entry {
+                        let k = lower_expr(key, casts, types, structs, variants, fn_names, type_names);
+                        let v = lower_expr(val, casts, types, structs, variants, fn_names, type_names);
+                        parts.push(format!("__m.insert({}, {});", k, v));
+                    }
+                }
+                if !parts.is_empty() {
+                    return format!(
+                        "{{ let mut __m = {}::new(); {} __m }}",
+                        map_ty,
+                        parts.join(" ")
+                    );
+                }
             }
             if op == "core.vec/len" && args.len() == 1 {
                 return format!(

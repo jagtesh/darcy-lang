@@ -625,6 +625,10 @@ fn infer_expr_type(
                 types,
             })
         }
+        Expr::Pair { span, .. } => {
+            Err(Diag::new("pair literal is only allowed inside hashmap/new or btreemap/new")
+                .with_span(span.clone()))
+        }
         Expr::MapLit {
             kind,
             entries,
@@ -840,6 +844,62 @@ fn infer_expr_type(
             })
         }
         Expr::Call { op, args, span } => {
+            if op == "core.hashmap/new" || op == "core.btreemap/new" {
+                let kind = if op == "core.hashmap/new" {
+                    MapKind::Hash
+                } else {
+                    MapKind::BTree
+                };
+                if args.is_empty() {
+                    return Err(Diag::new(
+                        "cannot infer map type from empty literal; add hashmap<K,V> annotation",
+                    )
+                    .with_span(span.clone()));
+                }
+                let mut casts = Vec::new();
+                let mut types = BTreeMap::new();
+                let mut key_ty = None::<InferTy>;
+                let mut val_ty = None::<InferTy>;
+                for entry in args {
+                    let (key, val) = match entry {
+                        Expr::Pair { key, val, .. } => (key.as_ref(), val.as_ref()),
+                        _ => {
+                            return Err(
+                                Diag::new("map entry must be (key value)").with_span(entry.span())
+                            )
+                        }
+                    };
+                    let tk = infer_expr_type(env, fns, ctx, vars, key)?;
+                    let tv = infer_expr_type(env, fns, ctx, vars, val)?;
+                    casts.extend(tk.casts.clone());
+                    casts.extend(tv.casts.clone());
+                    types.extend(tk.types);
+                    types.extend(tv.types);
+
+                    if let Some(ref cur_k) = key_ty {
+                        ctx.unify(cur_k, &tk.ty, &key.span())?;
+                    } else {
+                        key_ty = Some(tk.ty.clone());
+                    }
+                    if let Some(ref cur_v) = val_ty {
+                        ctx.unify(cur_v, &tv.ty, &val.span())?;
+                    } else {
+                        val_ty = Some(tv.ty.clone());
+                    }
+                }
+
+                let key_ty = key_ty.unwrap_or_else(|| ctx.fresh_var());
+                let val_ty = val_ty.unwrap_or_else(|| ctx.fresh_var());
+                let out_ty = InferTy::Map(kind, Box::new(key_ty), Box::new(val_ty));
+                types.insert(SpanKey::new(span), out_ty.clone());
+                return Ok(InferExpr {
+                    expr: e.clone(),
+                    ty: out_ty,
+                    casts,
+                    types,
+                });
+            }
+
             let mut targs = Vec::new();
             let mut casts = Vec::new();
             let mut types = BTreeMap::new();

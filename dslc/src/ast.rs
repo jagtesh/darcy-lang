@@ -90,6 +90,11 @@ pub enum Expr {
         span: Span,
         ann: Option<Ty>,
     },
+    Pair {
+        key: Box<Expr>,
+        val: Box<Expr>,
+        span: Span,
+    },
     Field {
         base: Box<Expr>,
         field: String,
@@ -121,6 +126,7 @@ impl Expr {
             Expr::Str(_, s) => s.clone(),
             Expr::Var(_, s) => s.clone(),
             Expr::VecLit { span, .. } => span.clone(),
+            Expr::Pair { span, .. } => span.clone(),
             Expr::Field { span, .. } => span.clone(),
             Expr::Match { span, .. } => span.clone(),
             Expr::Call { span, .. } => span.clone(),
@@ -632,8 +638,23 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                     Diag::new("empty list is not a valid expression").with_span(span.clone())
                 );
             }
-            let (op, op_span) = atom_sym(&items[0])
-                .ok_or_else(|| Diag::new("call head must be a symbol").with_span(se_span(&items[0])))?;
+            let (op, op_span) = match atom_sym(&items[0]) {
+                Some(v) => v,
+                None => {
+                    if items.len() == 2 {
+                        let key = parse_expr(&items[0])?;
+                        let val = parse_expr(&items[1])?;
+                        return Ok(Expr::Pair {
+                            key: Box::new(key),
+                            val: Box::new(val),
+                            span: span.clone(),
+                        });
+                    }
+                    return Err(
+                        Diag::new("call head must be a symbol").with_span(se_span(&items[0]))
+                    );
+                }
+            };
             if op.starts_with("core.hashmap/new") || op.starts_with("core.btreemap/new") {
                 let (kind, ann) = if let Some(inner) = op.strip_prefix("core.hashmap/new<") {
                     let inner = inner.strip_suffix('>').ok_or_else(|| {

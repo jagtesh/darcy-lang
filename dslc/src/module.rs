@@ -253,6 +253,11 @@ fn resolve_expr(res: &Resolver, e: &Expr) -> DslResult<Expr> {
                 span: span.clone(),
             })
         }
+        Expr::Pair { key, val, span } => Ok(Expr::Pair {
+            key: Box::new(resolve_expr(res, key)?),
+            val: Box::new(resolve_expr(res, val)?),
+            span: span.clone(),
+        }),
         Expr::Match { scrutinee, arms, span } => {
             let scrutinee = Box::new(resolve_expr(res, scrutinee)?);
             let mut out_arms = Vec::new();
