@@ -119,6 +119,7 @@ fn main() {
 fn run_compare(mut args: impl Iterator<Item = String>) {
     let mut baseline: Option<PathBuf> = None;
     let mut candidate: Option<PathBuf> = None;
+    let mut max_regression_pct: Option<f64> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--baseline" => {
@@ -127,9 +128,19 @@ fn run_compare(mut args: impl Iterator<Item = String>) {
             "--candidate" => {
                 candidate = Some(PathBuf::from(args.next().expect("--candidate requires a path")));
             }
+            "--max-regression-pct" => {
+                let v = args
+                    .next()
+                    .expect("--max-regression-pct requires a value")
+                    .parse::<f64>()
+                    .expect("invalid --max-regression-pct value");
+                max_regression_pct = Some(v);
+            }
             _ => {
                 eprintln!("unknown argument: {}", arg);
-                eprintln!("usage: bench_typecheck compare --baseline path --candidate path");
+                eprintln!(
+                    "usage: bench_typecheck compare --baseline path --candidate path [--max-regression-pct N]"
+                );
                 std::process::exit(2);
             }
         }
@@ -150,6 +161,16 @@ fn run_compare(mut args: impl Iterator<Item = String>) {
         "compare: baseline={:.3}us/iter, candidate={:.3}us/iter, delta={:+.3}us ({:+.2}%)",
         base, cand, delta, pct
     );
+
+    if let Some(max_pct) = max_regression_pct {
+        if delta > 0.0 && pct > max_pct {
+            eprintln!(
+                "regression: +{:.2}% exceeds max {:.2}%",
+                pct, max_pct
+            );
+            std::process::exit(1);
+        }
+    }
 }
 
 fn run_update(mut args: impl Iterator<Item = String>) {

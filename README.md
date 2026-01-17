@@ -64,8 +64,15 @@ You can save history, compare, and update baselines:
 
 ```bash
 cargo run -p dslc --bin bench_typecheck -- --iters 10000 --save-dir bench/history --label main
-cargo run -p dslc --bin bench_typecheck -- compare --baseline bench/baseline.json --candidate bench/typecheck.release.json
+cargo run -p dslc --bin bench_typecheck -- compare --baseline bench/baseline.json --candidate bench/typecheck.release.json --max-regression-pct 5
 cargo run -p dslc --bin bench_typecheck -- update --baseline bench/baseline.json --candidate bench/typecheck.release.json
+```
+
+Makefile workflow (release builds, timestamped history, and regression checks):
+
+```bash
+make bench-check
+make bench-accept
 ```
 
 To compare against CEL, enable the `cel` feature. The harness uses the `cel` crate to evaluate a
