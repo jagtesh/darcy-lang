@@ -13,7 +13,7 @@ pub use lexer::{lex, Tok, TokKind};
 pub use lower::lower_program;
 pub use pipeline::{analyze, PipelineOutput};
 pub use parser::{Parser, Sexp};
-pub use typecheck::{typecheck_fn, typecheck_tops, TypeEnv, TypecheckedProgram};
+pub use typecheck::{typecheck_fn, typecheck_tops, FnEnv, FnSig, TypeEnv, TypecheckedProgram};
 pub use typed::{CastHint, TypedExpr, TypedFn};
 
 

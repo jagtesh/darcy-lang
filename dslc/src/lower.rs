@@ -169,7 +169,11 @@ fn lower_expr(
                     lower_expr(&args[1], casts, types, structs)
                 )
             } else {
-                format!("/* unsupported call {} */", op)
+                let rendered: Vec<String> = args
+                    .iter()
+                    .map(|el| lower_expr(el, casts, types, structs))
+                    .collect();
+                format!("{}({})", op, rendered.join(", "))
             }
         }
     };

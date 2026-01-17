@@ -5,6 +5,37 @@ use crate::diag::{Diag, DslResult, Span};
 use crate::typed::{CastHint, SpanKey, TypedExpr, TypedFn};
 
 #[derive(Debug, Clone)]
+pub struct FnSig {
+    pub params: Vec<Ty>,
+    pub ret: Ty,
+}
+
+#[derive(Debug, Clone)]
+pub struct FnEnv {
+    pub fns: BTreeMap<String, FnSig>,
+}
+
+impl FnEnv {
+    pub fn new() -> Self {
+        Self {
+            fns: BTreeMap::new(),
+        }
+    }
+
+    pub fn insert(&mut self, name: String, sig: FnSig) -> DslResult<()> {
+        if self.fns.contains_key(&name) {
+            return Err(Diag::new(format!("duplicate function '{}'", name)));
+        }
+        self.fns.insert(name, sig);
+        Ok(())
+    }
+
+    pub fn get(&self, name: &str) -> Option<&FnSig> {
+        self.fns.get(name)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct TypeEnv {
     pub structs: BTreeMap<String, StructDef>,
 }
@@ -40,23 +71,34 @@ pub fn typecheck_tops(tops: &[Top]) -> DslResult<TypecheckedProgram> {
     }
 
     let mut typed_fns = Vec::new();
+    let mut fn_env = FnEnv::new();
     for t in tops {
         if let Top::Func(fd) = t {
-            typed_fns.push(typecheck_fn(&env, fd)?);
+            let typed = typecheck_fn(&env, &fn_env, fd)?;
+            let sig = FnSig {
+                params: fd
+                    .params
+                    .iter()
+                    .map(|p| typed.param_tys[&p.name].clone())
+                    .collect(),
+                ret: typed.body.ty.clone(),
+            };
+            fn_env.insert(fd.name.clone(), sig)?;
+            typed_fns.push(typed);
         }
     }
 
     Ok(TypecheckedProgram { env, typed_fns })
 }
 
-pub fn typecheck_fn(env: &TypeEnv, f: &FnDef) -> DslResult<TypedFn> {
+pub fn typecheck_fn(env: &TypeEnv, fns: &FnEnv, f: &FnDef) -> DslResult<TypedFn> {
     let param_tys = infer_param_types(env, f)?;
     let mut vars = BTreeMap::new();
     for (k, v) in &param_tys {
         vars.insert(k.clone(), v.clone());
     }
 
-    let body = infer_expr_type(env, &vars, &f.body)?;
+    let body = infer_expr_type(env, fns, &vars, &f.body)?;
     Ok(TypedFn {
         def: f.clone(),
         param_tys,
@@ -209,7 +251,12 @@ fn fmt_set(s: &BTreeSet<String>) -> String {
     format!("{{{}}}", v.join(", "))
 }
 
-fn infer_expr_type(env: &TypeEnv, vars: &BTreeMap<String, Ty>, e: &Expr) -> DslResult<TypedExpr> {
+fn infer_expr_type(
+    env: &TypeEnv,
+    fns: &FnEnv,
+    vars: &BTreeMap<String, Ty>,
+    e: &Expr,
+) -> DslResult<TypedExpr> {
     match e {
         Expr::Int(_, sp) => {
             let ty = Ty::Named("i32".to_string());
@@ -252,7 +299,7 @@ fn infer_expr_type(env: &TypeEnv, vars: &BTreeMap<String, Ty>, e: &Expr) -> DslR
             let mut types = BTreeMap::new();
             let mut elem_tys = Vec::new();
             for el in elems {
-                let te = infer_expr_type(env, vars, el)?;
+                let te = infer_expr_type(env, fns, vars, el)?;
                 casts.extend(te.casts.clone());
                 types.extend(te.types);
                 elem_tys.push((te.ty, el.span()));
@@ -308,7 +355,7 @@ fn infer_expr_type(env: &TypeEnv, vars: &BTreeMap<String, Ty>, e: &Expr) -> DslR
             })
         }
         Expr::Field { base, field, span } => {
-            let tb = infer_expr_type(env, vars, base)?;
+            let tb = infer_expr_type(env, fns, vars, base)?;
             let base_ty = tb.ty.clone();
             let (struct_name, is_vec) = match base_ty {
                 Ty::Named(n) => (n, false),
@@ -364,7 +411,7 @@ fn infer_expr_type(env: &TypeEnv, vars: &BTreeMap<String, Ty>, e: &Expr) -> DslR
             let mut casts = Vec::new();
             let mut types = BTreeMap::new();
             for a in args {
-                let ta = infer_expr_type(env, vars, a)?;
+                let ta = infer_expr_type(env, fns, vars, a)?;
                 casts.extend(ta.casts.clone());
                 types.extend(ta.types.clone());
                 targs.push(ta);
@@ -407,6 +454,37 @@ fn infer_expr_type(env: &TypeEnv, vars: &BTreeMap<String, Ty>, e: &Expr) -> DslR
                         }
                     }
                     let out_ty = Ty::Named(op.to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(TypedExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                _ if fns.get(op).is_some() => {
+                    let sig = fns.get(op).unwrap();
+                    if targs.len() != sig.params.len() {
+                        return Err(Diag::new(format!(
+                            "function '{}' expects {} arguments",
+                            op,
+                            sig.params.len()
+                        ))
+                        .with_span(span.clone()));
+                    }
+                    for (idx, (arg, param_ty)) in targs.iter().zip(sig.params.iter()).enumerate() {
+                        if arg.ty != *param_ty {
+                            return Err(Diag::new(format!(
+                                "function '{}' argument {} expects '{}', got '{}'",
+                                op,
+                                idx + 1,
+                                param_ty.rust(),
+                                arg.ty.rust()
+                            ))
+                            .with_span(args[idx].span()));
+                        }
+                    }
+                    let out_ty = sig.ret.clone();
                     types.insert(SpanKey::new(span), out_ty.clone());
                     Ok(TypedExpr {
                         expr: e.clone(),
