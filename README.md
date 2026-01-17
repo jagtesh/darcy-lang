@@ -42,6 +42,12 @@ cargo run -p dslc -- examples/ambiguous.dsl
 cargo run -p dslc -- examples/missing_field.dsl
 ```
 
+## Strategy examples (staged)
+
+- `examples/strategy_stage1.dsl` uses structs, unions, match, vectors, and print.
+- `examples/strategy_stage2.dsl` introduces extern types/functions and regime logic.
+- `examples/strategy_stage3.dsl` sketches multi-asset portfolio logic with broadcasting.
+
 ## Notes
 
 The intent is: your compiler does the "clarity layer" (shape + local type inference + good errors),
