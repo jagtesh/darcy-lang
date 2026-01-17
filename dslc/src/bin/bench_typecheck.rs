@@ -55,16 +55,18 @@ fn main() {
     let elapsed = start.elapsed();
     let elapsed_ns = elapsed.as_nanos();
     let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
+    let per_iter_ns = elapsed_ns as f64 / iters as f64;
+    let per_iter_us = per_iter_ns / 1000.0;
 
     println!(
-        "typecheck: {:.3}ms (iters={}, acc={})",
-        elapsed_ms, iters, acc
+        "typecheck: {:.3}ms total, {:.3}us/iter (iters={}, acc={})",
+        elapsed_ms, per_iter_us, iters, acc
     );
 
     if let Some(path) = save_path {
         let json = format!(
-            "{{\"iters\":{},\"elapsed_ns\":{},\"elapsed_ms\":{:.3}}}\n",
-            iters, elapsed_ns, elapsed_ms
+            "{{\"iters\":{},\"elapsed_ns\":{},\"elapsed_ms\":{:.3},\"per_iter_ns\":{:.3},\"per_iter_us\":{:.3}}}\n",
+            iters, elapsed_ns, elapsed_ms, per_iter_ns, per_iter_us
         );
         fs::write(&path, json).expect("write bench results");
         println!("saved results to {}", path.display());
