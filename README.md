@@ -35,6 +35,17 @@ cargo run -p dslc -- examples/ok.dsl > out.rs
 cat out.rs
 ```
 
+## Benchmark harness
+
+There is a small, dependency-free benchmark stub at `dslc/src/bin/bench.rs` that times a
+simple moving-average strategy. To run it:
+
+```bash
+cargo run -p dslc --bin bench -- --iters 200000
+```
+
+To compare against CEL, enable the `cel` feature and wire a CEL evaluator in the stub.
+
 Try the error cases:
 
 ```bash

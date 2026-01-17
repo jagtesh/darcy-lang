@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+
+[features]
+# Enable CEL comparison by wiring a CEL evaluator in dslc/src/bin/bench.rs.
+cel = []
