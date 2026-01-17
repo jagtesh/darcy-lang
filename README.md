@@ -60,6 +60,14 @@ cargo run -p dslc --bin bench_typecheck -- --iters 10000 --save bench/typecheck.
 cargo run -p dslc --release --bin bench_typecheck -- --iters 10000 --save bench/typecheck.release.json
 ```
 
+You can save history, compare, and update baselines:
+
+```bash
+cargo run -p dslc --bin bench_typecheck -- --iters 10000 --save-dir bench/history --label main
+cargo run -p dslc --bin bench_typecheck -- compare --baseline bench/baseline.json --candidate bench/typecheck.release.json
+cargo run -p dslc --bin bench_typecheck -- update --baseline bench/baseline.json --candidate bench/typecheck.release.json
+```
+
 To compare against CEL, enable the `cel` feature. The harness uses the `cel` crate to evaluate a
 simple expression with a custom `last_sma` function.
 

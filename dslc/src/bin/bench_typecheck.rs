@@ -1,15 +1,31 @@
 use std::env;
 use std::fs;
-use std::path::PathBuf;
-use std::time::Instant;
+use std::path::{Path, PathBuf};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use dslc::{lex, parse_toplevel, typecheck_tops, Parser};
 
 fn main() {
+    let mut args = env::args().skip(1).peekable();
+    match args.peek().map(|s| s.as_str()) {
+        Some("compare") => {
+            args.next();
+            run_compare(args);
+            return;
+        }
+        Some("update") => {
+            args.next();
+            run_update(args);
+            return;
+        }
+        _ => {}
+    }
+
     let mut iters = 1000usize;
     let mut save_path: Option<PathBuf> = None;
+    let mut save_dir: Option<PathBuf> = None;
+    let mut label: Option<String> = None;
 
-    let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--iters" => {
@@ -24,9 +40,21 @@ fn main() {
                 let v = args.next().expect("--save requires a path");
                 save_path = Some(PathBuf::from(v));
             }
+            "--save-dir" => {
+                let v = args.next().expect("--save-dir requires a path");
+                save_dir = Some(PathBuf::from(v));
+            }
+            "--label" => {
+                let v = args.next().expect("--label requires a value");
+                label = Some(v);
+            }
             _ => {
                 eprintln!("unknown argument: {}", arg);
-                eprintln!("usage: bench_typecheck [--iters N] [--save path]");
+                eprintln!(
+                    "usage: bench_typecheck [--iters N] [--save path] [--save-dir dir] [--label name]"
+                );
+                eprintln!("       bench_typecheck compare --baseline path --candidate path");
+                eprintln!("       bench_typecheck update --baseline path --candidate path");
                 std::process::exit(2);
             }
         }
@@ -63,12 +91,144 @@ fn main() {
         elapsed_ms, per_iter_us, iters, acc
     );
 
+    let timestamp_ns = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time")
+        .as_nanos();
+    let label_json = label
+        .as_ref()
+        .map(|s| json_escape(s))
+        .unwrap_or_else(|| "".to_string());
+    let json = format!(
+        "{{\"iters\":{},\"elapsed_ns\":{},\"elapsed_ms\":{:.3},\"per_iter_ns\":{:.3},\"per_iter_us\":{:.3},\"label\":\"{}\",\"timestamp_ns\":{}}}\n",
+        iters, elapsed_ns, elapsed_ms, per_iter_ns, per_iter_us, label_json, timestamp_ns
+    );
+
     if let Some(path) = save_path {
-        let json = format!(
-            "{{\"iters\":{},\"elapsed_ns\":{},\"elapsed_ms\":{:.3},\"per_iter_ns\":{:.3},\"per_iter_us\":{:.3}}}\n",
-            iters, elapsed_ns, elapsed_ms, per_iter_ns, per_iter_us
-        );
-        fs::write(&path, json).expect("write bench results");
+        write_json(&path, &json);
         println!("saved results to {}", path.display());
     }
+    if let Some(dir) = save_dir {
+        let filename = format_history_filename(label.as_deref(), timestamp_ns);
+        let path = dir.join(filename);
+        write_json(&path, &json);
+        println!("saved results to {}", path.display());
+    }
+}
+
+fn run_compare(mut args: impl Iterator<Item = String>) {
+    let mut baseline: Option<PathBuf> = None;
+    let mut candidate: Option<PathBuf> = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--baseline" => {
+                baseline = Some(PathBuf::from(args.next().expect("--baseline requires a path")));
+            }
+            "--candidate" => {
+                candidate = Some(PathBuf::from(args.next().expect("--candidate requires a path")));
+            }
+            _ => {
+                eprintln!("unknown argument: {}", arg);
+                eprintln!("usage: bench_typecheck compare --baseline path --candidate path");
+                std::process::exit(2);
+            }
+        }
+    }
+    let baseline = baseline.expect("--baseline is required");
+    let candidate = candidate.expect("--candidate is required");
+
+    let base = read_metric(&baseline, "per_iter_us").expect("read baseline metric");
+    let cand = read_metric(&candidate, "per_iter_us").expect("read candidate metric");
+    let delta = cand - base;
+    let pct = if base.abs() < f64::EPSILON {
+        0.0
+    } else {
+        (delta / base) * 100.0
+    };
+
+    println!(
+        "compare: baseline={:.3}us/iter, candidate={:.3}us/iter, delta={:+.3}us ({:+.2}%)",
+        base, cand, delta, pct
+    );
+}
+
+fn run_update(mut args: impl Iterator<Item = String>) {
+    let mut baseline: Option<PathBuf> = None;
+    let mut candidate: Option<PathBuf> = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--baseline" => {
+                baseline = Some(PathBuf::from(args.next().expect("--baseline requires a path")));
+            }
+            "--candidate" => {
+                candidate = Some(PathBuf::from(args.next().expect("--candidate requires a path")));
+            }
+            _ => {
+                eprintln!("unknown argument: {}", arg);
+                eprintln!("usage: bench_typecheck update --baseline path --candidate path");
+                std::process::exit(2);
+            }
+        }
+    }
+    let baseline = baseline.expect("--baseline is required");
+    let candidate = candidate.expect("--candidate is required");
+    if let Some(parent) = baseline.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).expect("create baseline directory");
+        }
+    }
+    fs::copy(&candidate, &baseline).expect("update baseline");
+    println!(
+        "updated baseline: {} <- {}",
+        baseline.display(),
+        candidate.display()
+    );
+}
+
+fn format_history_filename(label: Option<&str>, timestamp_ns: u128) -> String {
+    match label {
+        Some(l) if !l.is_empty() => format!("typecheck_{}_{}.json", l, timestamp_ns),
+        _ => format!("typecheck_{}.json", timestamp_ns),
+    }
+}
+
+fn write_json(path: &Path, json: &str) {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).expect("create save directory");
+        }
+    }
+    fs::write(path, json).expect("write bench results");
+}
+
+fn read_metric(path: &Path, key: &str) -> Result<f64, String> {
+    let raw = fs::read_to_string(path).map_err(|e| format!("read {}: {}", path.display(), e))?;
+    let needle = format!("\"{}\":", key);
+    let start = raw
+        .find(&needle)
+        .ok_or_else(|| format!("missing '{}' in {}", key, path.display()))?;
+    let mut idx = start + needle.len();
+    let bytes = raw.as_bytes();
+    while idx < bytes.len()
+        && (bytes[idx] == b' ' || bytes[idx] == b'\n' || bytes[idx] == b'\r' || bytes[idx] == b'\t')
+    {
+        idx += 1;
+    }
+    let mut end = idx;
+    while end < bytes.len() {
+        let c = bytes[end] as char;
+        if c.is_ascii_digit() || c == '.' || c == '-' {
+            end += 1;
+        } else {
+            break;
+        }
+    }
+    let val = raw[idx..end]
+        .parse::<f64>()
+        .map_err(|e| format!("parse {} in {}: {}", key, path.display(), e))?;
+    Ok(val)
+}
+
+fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('\"', "\\\"")
 }
