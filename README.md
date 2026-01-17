@@ -35,6 +35,15 @@ cargo run -p dslc -- examples/ok.dsl > out.rs
 cat out.rs
 ```
 
+## Modules quickstart
+
+```lisp
+(use "std/io" :as io)
+
+(defn main []
+  (io/print 42))
+```
+
 ## Benchmark harness
 
 There is a small, dependency-free benchmark stub at `dslc/src/bin/bench.rs` that times a
