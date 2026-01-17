@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use dslc::{compile, render_diag};
+use dslc::{compile_with_modules, render_diag};
 
 fn main() {
     let mut args = env::args().skip(1).collect::<Vec<_>>();
@@ -26,7 +26,16 @@ fn main() {
         }
     };
 
-    match compile(&src) {
+    let input_path = PathBuf::from(&file);
+    let input_dir = input_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let mut lib_paths = vec![input_dir.to_path_buf()];
+    if let Ok(cwd) = env::current_dir() {
+        if !lib_paths.contains(&cwd) {
+            lib_paths.push(cwd);
+        }
+    }
+
+    match compile_with_modules(&input_path, &src, &lib_paths) {
         Ok(rust) => {
             if run_mode {
                 if let Err(e) = run_rust(&file, &rust) {

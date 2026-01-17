@@ -19,7 +19,7 @@ pub struct Tok {
 }
 
 fn is_sym_start(c: char) -> bool {
-    c.is_ascii_alphabetic() || "_+-*/<>=!?".contains(c)
+    c.is_ascii_alphabetic() || "_:+-*/<>=!?".contains(c)
 }
 
 fn is_sym_char(c: char) -> bool {

@@ -118,6 +118,16 @@ pub enum Top {
     Struct(StructDef),
     Union(UnionDef),
     Func(FnDef),
+    Use(UseDecl),
+}
+
+#[derive(Debug, Clone)]
+pub struct UseDecl {
+    pub path: String,
+    pub alias: Option<String>,
+    pub only: Option<Vec<String>>,
+    pub open: bool,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -157,6 +167,42 @@ fn is_primitive_type(name: &str) -> bool {
     matches!(name, "i32" | "i64" | "u32" | "u64" | "f32" | "f64" | "bool" | "usize" | "isize" | "()")
 }
 
+fn is_module_path(prefix: &str) -> bool {
+    for seg in prefix.split('/') {
+        if seg.is_empty() {
+            return false;
+        }
+        for part in seg.split('.') {
+            if part.is_empty() || !is_lisp_ident(part) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn ensure_qualified_name(name: &str, span: &Span, kind: &str) -> DslResult<String> {
+    if let Some((prefix, item)) = name.rsplit_once('/') {
+        if prefix.is_empty() || item.is_empty() || !is_module_path(prefix) || !is_lisp_ident(item) {
+            return Err(Diag::new(format!("{} must be a qualified name like mod/name", kind))
+                .with_span(span.clone()));
+        }
+        Ok(name.to_string())
+    } else {
+        Err(Diag::new(format!("{} must be a qualified name like mod/name", kind))
+            .with_span(span.clone()))
+    }
+}
+
+fn ensure_type_name(name: &str, span: &Span) -> DslResult<String> {
+    if name.contains('/') {
+        ensure_qualified_name(name, span, "type name")?;
+        Ok(name.to_string())
+    } else {
+        ensure_lisp_ident(name, span, "type name")
+    }
+}
+
 fn parse_type_from_sym_checked(s: &str, sp: &Span) -> DslResult<Ty> {
     let ty = parse_type_from_sym(s);
     match &ty {
@@ -164,7 +210,7 @@ fn parse_type_from_sym_checked(s: &str, sp: &Span) -> DslResult<Ty> {
             if is_primitive_type(n) {
                 Ok(ty)
             } else {
-                let _ = ensure_lisp_ident(n, sp, "type name")?;
+                let _ = ensure_type_name(n, sp)?;
                 Ok(ty)
             }
         }
@@ -173,7 +219,7 @@ fn parse_type_from_sym_checked(s: &str, sp: &Span) -> DslResult<Ty> {
                 if is_primitive_type(n) {
                     Ok(ty)
                 } else {
-                    let _ = ensure_lisp_ident(n, sp, "type name")?;
+                    let _ = ensure_type_name(n, sp)?;
                     Ok(ty)
                 }
             }
@@ -206,6 +252,10 @@ fn ensure_lisp_ident(name: &str, span: &Span, kind: &str) -> DslResult<String> {
     } else {
         Err(Diag::new(format!("{} must be lowercase lisp-style (kebab-case)", kind)).with_span(span.clone()))
     }
+}
+
+fn is_builtin_op(name: &str) -> bool {
+    matches!(name, "+" | "-" | "*" | "/" | "print")
 }
 
 fn rust_value_name(name: &str) -> String {
@@ -404,6 +454,10 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
         Sexp::Atom(TokKind::Int(v), sp) => Ok(Expr::Int(*v, sp.clone())),
         Sexp::Atom(TokKind::Float(v), sp) => Ok(Expr::Float(*v, sp.clone())),
         Sexp::Atom(TokKind::Sym(s), sp) => {
+            if s.contains('/') {
+                return Err(Diag::new("qualified name is only allowed in call heads")
+                    .with_span(sp.clone()));
+            }
             if let Some((a, b)) = s.split_once('.') {
                 if !a.is_empty() && !b.is_empty() {
                     let a = ensure_lisp_ident(a, sp, "variable name")?;
@@ -448,8 +502,12 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                     ann: Some(head_ty),
                 });
             }
-            if !["+","-","*","/","print"].contains(&op.as_str()) {
-                ensure_lisp_ident(&op, &op_span, "call name")?;
+            if !is_builtin_op(&op) {
+                if op.contains('/') {
+                    ensure_qualified_name(&op, &op_span, "call name")?;
+                } else {
+                    ensure_lisp_ident(&op, &op_span, "call name")?;
+                }
             }
             let mut args = Vec::new();
             for a in items.iter().skip(1) {
@@ -532,7 +590,11 @@ fn parse_match(span: &Span, items: &[Sexp]) -> DslResult<Expr> {
                 break;
             }
         }
-        let head = ensure_lisp_ident(&head, &head_sp, "variant name")?;
+        let head = if head.contains('/') {
+            ensure_qualified_name(&head, &head_sp, "variant name")?
+        } else {
+            ensure_lisp_ident(&head, &head_sp, "variant name")?
+        };
         let body = parse_expr(&aitems[idx])?;
         arms.push(MatchArm {
             pat: MatchPat::Variant {
@@ -685,7 +747,7 @@ fn se_span(se: &Sexp) -> Span {
 pub fn parse_toplevel(sexps: &[Sexp]) -> DslResult<Vec<Top>> {
     let mut out = Vec::new();
     for se in sexps {
-        let (items, _span) = match se {
+        let (items, span) = match se {
             Sexp::List(items, span) => (items, span.clone()),
             _ => {
                 return Err(
@@ -699,6 +761,8 @@ pub fn parse_toplevel(sexps: &[Sexp]) -> DslResult<Vec<Top>> {
         let (head, _) = atom_sym(&items[0])
             .ok_or_else(|| Diag::new("top-level head must be a symbol").with_span(se_span(&items[0])))?;
         match head.as_str() {
+            "use" => out.push(Top::Use(parse_use_decl(&items[1..], &span, false)?)),
+            "open" => out.push(Top::Use(parse_use_decl(&items[1..], &span, true)?)),
             "extern" => out.push(parse_extern_toplevel(se)?),
             "defstruct" => out.push(Top::Struct(parse_struct(se)?)),
             "defunion" => out.push(Top::Union(parse_union(se)?)),
@@ -710,4 +774,60 @@ pub fn parse_toplevel(sexps: &[Sexp]) -> DslResult<Vec<Top>> {
         }
     }
     Ok(out)
+}
+
+pub fn parse_use_decl(items: &[Sexp], span: &Span, open: bool) -> DslResult<UseDecl> {
+    if items.is_empty() {
+        return Err(Diag::new("use form is (use \"path\" [:as name] [:only (a b)])").with_span(span.clone()));
+    }
+    let (path, path_sp) = match &items[0] {
+        Sexp::Atom(TokKind::Str(s), sp) => (s.clone(), sp.clone()),
+        _ => return Err(Diag::new("use path must be a string").with_span(span.clone())),
+    };
+    let mut alias = None;
+    let mut only = None;
+    let mut idx = 1usize;
+    while idx < items.len() {
+        let key = match &items[idx] {
+            Sexp::Atom(TokKind::Sym(s), _) => s.clone(),
+            _ => return Err(Diag::new("use modifier must be a symbol").with_span(span.clone())),
+        };
+        idx += 1;
+        match key.as_str() {
+            ":as" => {
+                let (name, sp) = match items.get(idx) {
+                    Some(Sexp::Atom(TokKind::Sym(s), sp)) => (s.clone(), sp.clone()),
+                    _ => return Err(Diag::new("use :as must be followed by a symbol").with_span(span.clone())),
+                };
+                let name = ensure_lisp_ident(&name, &sp, "use alias")?;
+                alias = Some(name);
+                idx += 1;
+            }
+            ":only" => {
+                let list = match items.get(idx) {
+                    Some(Sexp::List(v, _)) => v,
+                    _ => return Err(Diag::new("use :only must be followed by a list").with_span(span.clone())),
+                };
+                let mut names = Vec::new();
+                for it in list {
+                    if let Some((s, sp)) = atom_sym(it) {
+                        let s = ensure_lisp_ident(&s, &sp, "use :only name")?;
+                        names.push(s);
+                    } else {
+                        return Err(Diag::new("use :only entries must be symbols").with_span(span.clone()));
+                    }
+                }
+                only = Some(names);
+                idx += 1;
+            }
+            _ => return Err(Diag::new("unknown use modifier").with_span(span.clone())),
+        }
+    }
+    if alias.is_some() && only.is_some() {
+        return Err(Diag::new("use cannot combine :as with :only").with_span(span.clone()));
+    }
+    if open && (alias.is_some() || only.is_some()) {
+        return Err(Diag::new("open does not accept :as or :only").with_span(span.clone()));
+    }
+    Ok(UseDecl { path, alias, only, open, span: path_sp })
 }
