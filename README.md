@@ -16,13 +16,13 @@ What it supports (MVP):
   - print: `(print expr)`
   - extern wrapper: `(extern (defstruct ...))`, `(extern (defunion ...))`, `(extern (defn name [params] RetType))`
   - comments: `; line` and `#| block |#`
+  - modules: `(use "std/io")`, `(use "std/io" :as io)`, `(use "std/io" :only (print))`, `(open "std/io")`
 
 What it does NOT support yet:
 - borrowing/ownership surface syntax
 - generics / traits
 - function calls beyond numeric ops
 - pattern matching
-- modules
 - macros
 - helpful multi-span diagnostics (only 1 span)
 
@@ -42,6 +42,13 @@ simple moving-average strategy. To run it:
 
 ```bash
 cargo run -p dslc --bin bench -- --iters 200000
+```
+
+There is also a typecheck/inference benchmark that reports total and per-iteration time:
+
+```bash
+cargo run -p dslc --bin bench_typecheck -- --iters 10000 --save bench/typecheck.json
+cargo run -p dslc --release --bin bench_typecheck -- --iters 10000 --save bench/typecheck.release.json
 ```
 
 To compare against CEL, enable the `cel` feature. The harness uses the `cel` crate to evaluate a
@@ -68,3 +75,5 @@ and Rust remains the final checker for deep lifetime / trait issues.
 Naming: DSL identifiers are lowercase kebab-case. They are normalized to Rust identifiers during lowering
 (types and variants become PascalCase; values become snake_case). Use `(extern "RustName" (def...))`
 to override the Rust name for extern declarations.
+
+See `LANGUAGE.md` for the living language guide.
