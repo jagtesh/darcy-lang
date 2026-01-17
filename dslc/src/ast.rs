@@ -247,15 +247,41 @@ fn is_lisp_ident(name: &str) -> bool {
 }
 
 fn ensure_lisp_ident(name: &str, span: &Span, kind: &str) -> DslResult<String> {
-    if is_lisp_ident(name) {
-        Ok(name.to_string())
-    } else {
-        Err(Diag::new(format!("{} must be lowercase lisp-style (kebab-case)", kind)).with_span(span.clone()))
+    if !is_lisp_ident(name) {
+        return Err(
+            Diag::new(format!("{} must be lowercase lisp-style (kebab-case)", kind))
+                .with_span(span.clone()),
+        );
     }
+    if is_reserved_ident(name) {
+        return Err(
+            Diag::new(format!("'{}' is a reserved keyword", name)).with_span(span.clone()),
+        );
+    }
+    Ok(name.to_string())
 }
 
 fn is_builtin_op(name: &str) -> bool {
     matches!(name, "+" | "-" | "*" | "/" | "print")
+}
+
+fn is_reserved_ident(name: &str) -> bool {
+    matches!(
+        name,
+        "defn"
+            | "defstruct"
+            | "defunion"
+            | "extern"
+            | "match"
+            | "use"
+            | "open"
+            | "vec"
+            | "print"
+            | "spawn"
+            | "join"
+            | "par-map"
+            | "par-reduce"
+    )
 }
 
 fn rust_value_name(name: &str) -> String {

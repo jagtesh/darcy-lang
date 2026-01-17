@@ -16,6 +16,7 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
   - Line: `; comment`
   - Block: `#| comment |#`
 - **Strings**: double-quoted, e.g. `"hello"`.
+- **Reserved keywords** (cannot be used as identifiers): `defn`, `defstruct`, `defunion`, `extern`, `match`, `use`, `open`, `vec`, `print`, `spawn`, `join`, `par-map`, `par-reduce`.
 
 ## Literals
 

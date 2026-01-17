@@ -69,9 +69,9 @@ fn dotted_module_prefix() {
     let lib_dir = root.join("lib");
     let std_dir = lib_dir.join("std");
     fs::create_dir_all(&std_dir).expect("create std dir");
-    fs::write(std_dir.join("io.dsl"), "(defn print [x:i32] x)").expect("write module");
+    fs::write(std_dir.join("io.dsl"), "(defn echo [x:i32] x)").expect("write module");
 
-    let src = "(use \"std/io\") (defn main [] (std.io/print 1))";
+    let src = "(use \"std/io\") (defn main [] (std.io/echo 1))";
     let out = compile_with_modules(&root.join("main.dsl"), src, &[lib_dir]).expect("compile ok");
     assert!(out.contains("fn main"));
 }

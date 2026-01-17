@@ -9,9 +9,9 @@ fn infers_param_from_literal() {
 
 #[test]
 fn infers_param_from_call() {
-    let src = "(defn inc [x:i32] (+ x 1)) (defn use [y] (inc y))";
+    let src = "(defn inc [x:i32] (+ x 1)) (defn apply-one [y] (inc y))";
     let out = compile(src).expect("compile ok");
-    assert!(out.contains("fn use(y: i32) -> i32"), "{}", out);
+    assert!(out.contains("fn apply_one(y: i32) -> i32"), "{}", out);
 }
 
 #[test]

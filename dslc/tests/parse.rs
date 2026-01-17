@@ -18,3 +18,13 @@ fn parses_struct_and_fn() {
         _ => panic!("expected function"),
     }
 }
+
+#[test]
+fn rejects_reserved_keyword_as_name() {
+    let src = "(defn vec [x] x)";
+    let toks = lex(src).expect("lex ok");
+    let mut parser = Parser::new(toks);
+    let sexps = parser.parse_all().expect("parse sexps");
+    let err = parse_toplevel(&sexps).expect_err("expected error");
+    assert!(err.message.contains("reserved keyword"), "{}", err.message);
+}
