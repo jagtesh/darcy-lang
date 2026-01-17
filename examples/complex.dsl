@@ -3,6 +3,7 @@
   (qty i32)
   (price f64))
 
+
 (defn total_prices [os:Vec<Order>]
   (* os.price 2.0))
 

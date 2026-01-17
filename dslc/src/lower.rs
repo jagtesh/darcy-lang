@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::ast::{Expr, StructDef, Top, Ty};
+use crate::ast::{Expr, MatchPat, StructDef, Top, Ty, VariantDef};
 use crate::diag::{Diag, DslResult, Span};
 use crate::typed::{SpanKey, TypedFn};
 use crate::PipelineOutput;
@@ -11,6 +11,8 @@ pub fn lower_program(pipeline: &PipelineOutput) -> DslResult<String> {
     out.push_str("#![allow(dead_code)]\n\n");
 
     let mut structs = BTreeMap::new();
+    let mut unions = BTreeMap::new();
+    let mut variants: BTreeMap<String, (String, VariantDef)> = BTreeMap::new();
     for t in &pipeline.tops {
         if let Top::Struct(sd) = t {
             structs.insert(sd.name.clone(), sd.clone());
@@ -21,6 +23,29 @@ pub fn lower_program(pipeline: &PipelineOutput) -> DslResult<String> {
             }
             out.push_str("}\n\n");
         }
+        if let Top::Union(ud) = t {
+            unions.insert(ud.name.clone(), ud.clone());
+            for v in &ud.variants {
+                variants.insert(v.name.clone(), (ud.name.clone(), v.clone()));
+            }
+        }
+    }
+
+    for ud in unions.values() {
+        out.push_str(&format!("#[derive(Debug, Clone)]\n"));
+        out.push_str(&format!("pub enum {} {{\n", ud.name));
+        for v in &ud.variants {
+            if v.fields.is_empty() {
+                out.push_str(&format!("    {},\n", v.name));
+            } else {
+                out.push_str(&format!("    {} {{\n", v.name));
+                for f in &v.fields {
+                    out.push_str(&format!("        {}: {},\n", f.name, f.ty.rust()));
+                }
+                out.push_str("    },\n");
+            }
+        }
+        out.push_str("}\n\n");
     }
 
     let mut typed_iter = pipeline.typechecked.typed_fns.iter();
@@ -47,6 +72,7 @@ pub fn lower_program(pipeline: &PipelineOutput) -> DslResult<String> {
                 &typed.body.casts,
                 &typed.body.types,
                 &structs,
+                &variants,
             ));
             if is_main {
                 out.push_str(";\n}\n\n");
@@ -79,6 +105,7 @@ fn lower_expr(
     casts: &[crate::typed::CastHint],
     types: &BTreeMap<SpanKey, Ty>,
     structs: &BTreeMap<String, StructDef>,
+    variants: &BTreeMap<String, (String, VariantDef)>,
 ) -> String {
     let mut inner = match e {
         Expr::Int(v, _) => v.to_string(),
@@ -100,7 +127,7 @@ fn lower_expr(
             } else {
                 let rendered: Vec<String> = elems
                     .iter()
-                    .map(|el| lower_expr(el, casts, types, structs))
+                    .map(|el| lower_expr(el, casts, types, structs, variants))
                     .collect();
                 format!("vec![{}]", rendered.join(", "))
             }
@@ -108,32 +135,87 @@ fn lower_expr(
         Expr::Field { base, field, span: _ } => {
             let base_ty = expr_ty(types, &base.span());
             if let Some(Ty::Vec(_)) = base_ty {
-                let base_expr = lower_expr(base, casts, types, structs);
+                let base_expr = lower_expr(base, casts, types, structs, variants);
                 format!(
                     "({}).into_iter().map(|__x| __x.{}).collect::<Vec<_>>()",
                     base_expr, field
                 )
             } else {
-                format!("{}.{}", lower_expr(base, casts, types, structs), field)
+                format!("{}.{}", lower_expr(base, casts, types, structs, variants), field)
             }
+        }
+        Expr::Match { scrutinee, arms, .. } => {
+            let scrut = lower_expr(scrutinee, casts, types, structs, variants);
+            let mut rendered = String::new();
+            rendered.push_str(&format!("match {} {{ ", scrut));
+            for arm in arms {
+                match &arm.pat {
+                    MatchPat::Wildcard(_) => {
+                        rendered.push_str("_ => ");
+                    }
+                    MatchPat::Variant { name, bindings, .. } => {
+                        if let Some((union_name, vdef)) = variants.get(name) {
+                            if vdef.fields.is_empty() {
+                                rendered.push_str(&format!("{}::{} => ", union_name, name));
+                            } else {
+                                let mut parts = Vec::new();
+                                for (field, binding, _) in bindings {
+                                    if binding == "_" {
+                                        parts.push(format!("{}: _", field));
+                                    } else {
+                                        parts.push(format!("{}: {}", field, binding));
+                                    }
+                                }
+                                rendered.push_str(&format!(
+                                    "{}::{} {{ {} }} => ",
+                                    union_name,
+                                    name,
+                                    parts.join(", ")
+                                ));
+                            }
+                        } else {
+                            rendered.push_str(&format!("{} => ", name));
+                        }
+                    }
+                }
+                let body = lower_expr(&arm.body, casts, types, structs, variants);
+                rendered.push_str(&format!("{}, ", body));
+            }
+            rendered.push_str("}");
+            rendered
         }
         Expr::Call { op, args, span: _ } => {
             if op == "print" && args.len() == 1 {
                 return format!(
                     "println!(\"{{:?}}\", {})",
-                    lower_expr(&args[0], casts, types, structs)
+                    lower_expr(&args[0], casts, types, structs, variants)
                 );
             }
             if let Some(sd) = structs.get(op) {
                 let rendered: Vec<String> = args
                     .iter()
-                    .map(|el| lower_expr(el, casts, types, structs))
+                    .map(|el| lower_expr(el, casts, types, structs, variants))
                     .collect();
                 let mut parts = Vec::new();
                 for (field, expr) in sd.fields.iter().zip(rendered.iter()) {
                     parts.push(format!("{}: {}", field.name, expr));
                 }
                 return format!("{} {{ {} }}", op, parts.join(", "));
+            }
+            if let Some((union_name, vdef)) = variants.get(op) {
+                let rendered: Vec<String> = args
+                    .iter()
+                    .map(|el| lower_expr(el, casts, types, structs, variants))
+                    .collect();
+                let mut parts = Vec::new();
+                for (field, expr) in vdef.fields.iter().zip(rendered.iter()) {
+                    parts.push(format!("{}: {}", field.name, expr));
+                }
+                return if vdef.fields.is_empty() {
+                    format!("{}::{}", union_name, op)
+                } else {
+                    format!("{}::{} {{ {} }}", union_name, op, parts.join(", "))
+                };
             }
             if args.len() == 2 && ["+", "-", "*", "/"].contains(&op.as_str()) {
                 let left_ty = expr_ty(types, &args[0].span());
@@ -146,6 +228,7 @@ fn lower_expr(
                         casts,
                         types,
                         structs,
+                        variants,
                         true,
                         &right_ty,
                     );
@@ -158,20 +241,21 @@ fn lower_expr(
                         casts,
                         types,
                         structs,
+                        variants,
                         false,
                         &left_ty,
                     );
                 }
                 format!(
                     "({} {} {})",
-                    lower_expr(&args[0], casts, types, structs),
+                    lower_expr(&args[0], casts, types, structs, variants),
                     op,
-                    lower_expr(&args[1], casts, types, structs)
+                    lower_expr(&args[1], casts, types, structs, variants)
                 )
             } else {
                 let rendered: Vec<String> = args
                     .iter()
-                    .map(|el| lower_expr(el, casts, types, structs))
+                    .map(|el| lower_expr(el, casts, types, structs, variants))
                     .collect();
                 format!("{}({})", op, rendered.join(", "))
             }
@@ -202,13 +286,14 @@ fn vec_scalar_binop(
     casts: &[crate::typed::CastHint],
     types: &BTreeMap<SpanKey, Ty>,
     structs: &BTreeMap<String, StructDef>,
+    variants: &BTreeMap<String, (String, VariantDef)>,
     vec_on_left: bool,
     scalar_ty: &Ty,
 ) -> String {
     let vec_expr = if vec_on_left { left } else { right };
     let scalar_expr = if vec_on_left { right } else { left };
-    let vec_render = lower_expr(vec_expr, casts, types, structs);
-    let scalar_render = lower_expr(scalar_expr, casts, types, structs);
+    let vec_render = lower_expr(vec_expr, casts, types, structs, variants);
+    let scalar_render = lower_expr(scalar_expr, casts, types, structs, variants);
     let scalar = match scalar_ty {
         Ty::Named(_) => scalar_render,
         _ => scalar_render,

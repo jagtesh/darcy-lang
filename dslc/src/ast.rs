@@ -34,6 +34,20 @@ pub struct StructDef {
 }
 
 #[derive(Debug, Clone)]
+pub struct VariantDef {
+    pub name: String,
+    pub fields: Vec<Field>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct UnionDef {
+    pub name: String,
+    pub variants: Vec<VariantDef>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
 pub struct Param {
     pub name: String,
     pub ann: Option<Ty>,
@@ -55,6 +69,11 @@ pub enum Expr {
         field: String,
         span: Span,
     },
+    Match {
+        scrutinee: Box<Expr>,
+        arms: Vec<MatchArm>,
+        span: Span,
+    },
     Call {
         op: String,
         args: Vec<Expr>,
@@ -70,6 +89,7 @@ impl Expr {
             Expr::Var(_, s) => s.clone(),
             Expr::VecLit { span, .. } => span.clone(),
             Expr::Field { span, .. } => span.clone(),
+            Expr::Match { span, .. } => span.clone(),
             Expr::Call { span, .. } => span.clone(),
         }
     }
@@ -86,7 +106,25 @@ pub struct FnDef {
 #[derive(Debug, Clone)]
 pub enum Top {
     Struct(StructDef),
+    Union(UnionDef),
     Func(FnDef),
+}
+
+#[derive(Debug, Clone)]
+pub struct MatchArm {
+    pub pat: MatchPat,
+    pub body: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum MatchPat {
+    Variant {
+        name: String,
+        bindings: Vec<(String, String, Span)>,
+        span: Span,
+    },
+    Wildcard(Span),
 }
 
 fn atom_sym(se: &Sexp) -> Option<(String, Span)> {
@@ -155,6 +193,80 @@ pub fn parse_struct(se: &Sexp) -> DslResult<StructDef> {
     })
 }
 
+pub fn parse_union(se: &Sexp) -> DslResult<UnionDef> {
+    let (items, span) = match se {
+        Sexp::List(items, span) => (items, span.clone()),
+        _ => return Err(Diag::new("expected (defunion ...)").with_span(se_span(se))),
+    };
+    if items.len() < 2 {
+        return Err(Diag::new("defunion requires a name").with_span(span));
+    }
+    let (head, _) = atom_sym(&items[0])
+        .ok_or_else(|| Diag::new("expected symbol 'defunion'").with_span(se_span(&items[0])))?;
+    if head != "defunion" {
+        return Err(Diag::new("expected 'defunion'").with_span(se_span(&items[0])));
+    }
+    let (name, name_sp) = atom_sym(&items[1])
+        .ok_or_else(|| Diag::new("expected union name").with_span(se_span(&items[1])))?;
+
+    let mut variants = Vec::new();
+    for v in items.iter().skip(2) {
+        let (vitems, vspan) = match v {
+            Sexp::List(v, sp) => (v, sp.clone()),
+            _ => {
+                return Err(
+                    Diag::new("variant must be (Name (field Type) ...)")
+                        .with_span(se_span(v)),
+                )
+            }
+        };
+        if vitems.is_empty() {
+            return Err(Diag::new("variant must have a name").with_span(vspan));
+        }
+        let (vname, vname_sp) = atom_sym(&vitems[0])
+            .ok_or_else(|| Diag::new("expected variant name").with_span(se_span(&vitems[0])))?;
+        let mut fields = Vec::new();
+        for f in vitems.iter().skip(1) {
+            let (fitems, fspan) = match f {
+                Sexp::List(v, sp) => (v, sp.clone()),
+                _ => return Err(Diag::new("field must be (name Type)").with_span(se_span(f))),
+            };
+            if fitems.len() != 2 {
+                return Err(Diag::new("field must be (name Type)").with_span(fspan));
+            }
+            let (fname, fsp) = atom_sym(&fitems[0])
+                .ok_or_else(|| Diag::new("expected field name").with_span(se_span(&fitems[0])))?;
+            let (fty_s, _) = atom_sym(&fitems[1])
+                .ok_or_else(|| Diag::new("expected field type").with_span(se_span(&fitems[1])))?;
+            fields.push(Field {
+                name: fname,
+                ty: parse_type_from_sym(&fty_s),
+                span: Span {
+                    start: fsp.start,
+                    end: fspan.end,
+                },
+            });
+        }
+        variants.push(VariantDef {
+            name: vname,
+            fields,
+            span: Span {
+                start: vname_sp.start,
+                end: vspan.end,
+            },
+        });
+    }
+
+    Ok(UnionDef {
+        name,
+        variants,
+        span: Span {
+            start: name_sp.start,
+            end: span.end,
+        },
+    })
+}
+
 pub fn parse_params(se: &Sexp) -> DslResult<Vec<Param>> {
     let (items, _span) = match se {
         Sexp::Brack(items, span) => (items, span.clone()),
@@ -208,6 +320,9 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
             }
             let (op, op_span) = atom_sym(&items[0])
                 .ok_or_else(|| Diag::new("call head must be a symbol").with_span(se_span(&items[0])))?;
+            if op == "match" {
+                return parse_match(span, &items[1..]);
+            }
             let head_ty = parse_type_from_sym(&op);
             if let Ty::Vec(_) = head_ty {
                 let mut elems = Vec::new();
@@ -245,6 +360,76 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
             })
         }
     }
+}
+
+fn parse_match(span: &Span, items: &[Sexp]) -> DslResult<Expr> {
+    if items.len() < 2 {
+        return Err(
+            Diag::new("match form is (match expr (Variant (...) expr) ...)")
+                .with_span(span.clone()),
+        );
+    }
+    let scrutinee = parse_expr(&items[0])?;
+    let mut arms = Vec::new();
+    for arm in items.iter().skip(1) {
+        let (aitems, aspan) = match arm {
+            Sexp::List(v, sp) => (v, sp.clone()),
+            _ => return Err(Diag::new("match arm must be a list").with_span(se_span(arm))),
+        };
+        if aitems.len() < 2 {
+            return Err(Diag::new("match arm must have a pattern and body").with_span(aspan));
+        }
+        let (head, head_sp) = atom_sym(&aitems[0])
+            .ok_or_else(|| Diag::new("match arm head must be a symbol").with_span(se_span(&aitems[0])))?;
+        if head == "_" {
+            if aitems.len() != 2 {
+                return Err(Diag::new("wildcard match arm is (_ expr)").with_span(aspan));
+            }
+            let body = parse_expr(&aitems[1])?;
+            arms.push(MatchArm {
+                pat: MatchPat::Wildcard(head_sp),
+                body,
+                span: aspan,
+            });
+            continue;
+        }
+        let mut bindings = Vec::new();
+        let mut idx = 1usize;
+        while idx + 1 < aitems.len() {
+            if let Sexp::List(bind, _bspan) = &aitems[idx] {
+                if bind.len() == 2 {
+                    if let Some((field, fsp)) = atom_sym(&bind[0]) {
+                        if let Some((name, nsp)) = atom_sym(&bind[1]) {
+                            bindings.push((field, name, Span { start: fsp.start, end: nsp.end }));
+                            idx += 1;
+                            continue;
+                        }
+                    }
+                }
+                break;
+            } else {
+                break;
+            }
+        }
+        let body = parse_expr(&aitems[idx])?;
+        arms.push(MatchArm {
+            pat: MatchPat::Variant {
+                name: head,
+                bindings,
+                span: Span {
+                    start: head_sp.start,
+                    end: aspan.end,
+                },
+            },
+            body,
+            span: aspan,
+        });
+    }
+    Ok(Expr::Match {
+        scrutinee: Box::new(scrutinee),
+        arms,
+        span: span.clone(),
+    })
 }
 
 pub fn parse_fn(se: &Sexp) -> DslResult<FnDef> {
@@ -301,6 +486,7 @@ pub fn parse_toplevel(sexps: &[Sexp]) -> DslResult<Vec<Top>> {
             .ok_or_else(|| Diag::new("top-level head must be a symbol").with_span(se_span(&items[0])))?;
         match head.as_str() {
             "defstruct" => out.push(Top::Struct(parse_struct(se)?)),
+            "defunion" => out.push(Top::Union(parse_union(se)?)),
             "defn" => out.push(Top::Func(parse_fn(se)?)),
             _ => {
                 return Err(Diag::new(format!("unknown top-level form '{}'", head))

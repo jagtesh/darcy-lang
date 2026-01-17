@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::ast::{Expr, FnDef, StructDef, Top, Ty};
+use crate::ast::{Expr, FnDef, MatchPat, StructDef, Top, Ty, UnionDef, VariantDef};
 use crate::diag::{Diag, DslResult, Span};
 use crate::typed::{CastHint, SpanKey, TypedExpr, TypedFn};
 
@@ -38,20 +38,50 @@ impl FnEnv {
 #[derive(Debug, Clone)]
 pub struct TypeEnv {
     pub structs: BTreeMap<String, StructDef>,
+    pub unions: BTreeMap<String, UnionDef>,
+    pub variants: BTreeMap<String, (String, VariantDef)>,
 }
 
 impl TypeEnv {
     pub fn new() -> Self {
         Self {
             structs: BTreeMap::new(),
+            unions: BTreeMap::new(),
+            variants: BTreeMap::new(),
         }
     }
 
     pub fn insert_struct(&mut self, sd: StructDef) -> DslResult<()> {
-        if self.structs.contains_key(&sd.name) {
+        if self.structs.contains_key(&sd.name)
+            || self.unions.contains_key(&sd.name)
+            || self.variants.contains_key(&sd.name)
+        {
             return Err(Diag::new(format!("duplicate struct '{}'", sd.name)).with_span(sd.span));
         }
         self.structs.insert(sd.name.clone(), sd);
+        Ok(())
+    }
+
+    pub fn insert_union(&mut self, ud: UnionDef) -> DslResult<()> {
+        if self.structs.contains_key(&ud.name)
+            || self.unions.contains_key(&ud.name)
+            || self.variants.contains_key(&ud.name)
+        {
+            return Err(Diag::new(format!("duplicate union '{}'", ud.name)).with_span(ud.span));
+        }
+        for v in &ud.variants {
+            if self.structs.contains_key(&v.name)
+                || self.unions.contains_key(&v.name)
+                || self.variants.contains_key(&v.name)
+            {
+                return Err(
+                    Diag::new(format!("duplicate variant '{}'", v.name)).with_span(v.span.clone()),
+                );
+            }
+            self.variants
+                .insert(v.name.clone(), (ud.name.clone(), v.clone()));
+        }
+        self.unions.insert(ud.name.clone(), ud);
         Ok(())
     }
 }
@@ -68,12 +98,22 @@ pub fn typecheck_tops(tops: &[Top]) -> DslResult<TypecheckedProgram> {
         if let Top::Struct(sd) = t {
             env.insert_struct(sd.clone())?;
         }
+        if let Top::Union(ud) = t {
+            env.insert_union(ud.clone())?;
+        }
     }
 
     let mut typed_fns = Vec::new();
     let mut fn_env = FnEnv::new();
     for t in tops {
         if let Top::Func(fd) = t {
+            if env.structs.contains_key(&fd.name)
+                || env.unions.contains_key(&fd.name)
+                || env.variants.contains_key(&fd.name)
+                || fn_env.get(&fd.name).is_some()
+            {
+                return Err(Diag::new(format!("duplicate function '{}'", fd.name)).with_span(fd.span.clone()));
+            }
             let typed = typecheck_fn(&env, &fn_env, fd)?;
             let sig = FnSig {
                 params: fd
@@ -406,6 +446,138 @@ fn infer_expr_type(
                 types,
             })
         }
+        Expr::Match { scrutinee, arms, span } => {
+            let scrut = infer_expr_type(env, fns, vars, scrutinee)?;
+            let union_name = match &scrut.ty {
+                Ty::Named(n) => n.clone(),
+                Ty::Unknown => {
+                    return Err(
+                        Diag::new("cannot match on unknown type").with_span(span.clone()),
+                    )
+                }
+                other => {
+                    return Err(Diag::new(format!(
+                        "match expects a union type, got '{}'",
+                        other.rust()
+                    ))
+                    .with_span(span.clone()))
+                }
+            };
+            let union = env.unions.get(&union_name).ok_or_else(|| {
+                Diag::new(format!("match expects a union type, got '{}'", union_name))
+                    .with_span(span.clone())
+            })?;
+
+            let mut arm_types = Vec::new();
+            let mut casts = scrut.casts.clone();
+            let mut types = scrut.types.clone();
+            let mut seen_variants = BTreeSet::new();
+            let mut has_wildcard = false;
+
+            for arm in arms {
+                let mut arm_vars = vars.clone();
+                match &arm.pat {
+                    MatchPat::Wildcard(_) => {
+                        has_wildcard = true;
+                    }
+                    MatchPat::Variant { name, bindings, span: pspan } => {
+                        let (_, vdef) = env.variants.get(name).ok_or_else(|| {
+                            Diag::new(format!("unknown variant '{}'", name)).with_span(pspan.clone())
+                        })?;
+                        let (v_union, _) = env.variants.get(name).unwrap();
+                        if v_union != &union_name {
+                            return Err(Diag::new(format!(
+                                "variant '{}' does not belong to union '{}'",
+                                name, union_name
+                            ))
+                            .with_span(pspan.clone()));
+                        }
+                        if vdef.fields.len() != bindings.len() {
+                            return Err(Diag::new(format!(
+                                "variant '{}' expects {} bindings",
+                                name,
+                                vdef.fields.len()
+                            ))
+                            .with_span(pspan.clone()));
+                        }
+                        if seen_variants.contains(name) {
+                            return Err(Diag::new(format!(
+                                "duplicate match arm for variant '{}'",
+                                name
+                            ))
+                            .with_span(pspan.clone()));
+                        }
+                        seen_variants.insert(name.clone());
+                        let mut seen_fields = BTreeSet::new();
+                        for (field_name, bind_name, bspan) in bindings {
+                            if seen_fields.contains(field_name) {
+                                return Err(Diag::new(format!(
+                                    "duplicate field binding '{}'",
+                                    field_name
+                                ))
+                                .with_span(bspan.clone()));
+                            }
+                            seen_fields.insert(field_name.clone());
+                            let fdef = vdef
+                                .fields
+                                .iter()
+                                .find(|f| f.name == *field_name)
+                                .ok_or_else(|| {
+                                    Diag::new(format!(
+                                        "variant '{}' has no field '{}'",
+                                        name, field_name
+                                    ))
+                                    .with_span(bspan.clone())
+                                })?;
+                            if bind_name != "_" {
+                                arm_vars.insert(bind_name.clone(), fdef.ty.clone());
+                            }
+                        }
+                    }
+                }
+                let tarm = infer_expr_type(env, fns, &arm_vars, &arm.body)?;
+                casts.extend(tarm.casts.clone());
+                types.extend(tarm.types.clone());
+                arm_types.push((tarm.ty, arm.span.clone()));
+            }
+
+            if !has_wildcard {
+                let mut missing = Vec::new();
+                for v in &union.variants {
+                    if !seen_variants.contains(&v.name) {
+                        missing.push(v.name.clone());
+                    }
+                }
+                if !missing.is_empty() {
+                    return Err(Diag::new(format!(
+                        "non-exhaustive match: missing {}",
+                        missing.join(", ")
+                    ))
+                    .with_span(span.clone()));
+                }
+            }
+
+            let (first_ty, _) = arm_types
+                .get(0)
+                .ok_or_else(|| Diag::new("match requires at least one arm").with_span(span.clone()))?;
+            for (ty, tsp) in &arm_types[1..] {
+                if ty != first_ty {
+                    return Err(Diag::new(format!(
+                        "match arms must return the same type; got '{}' and '{}'",
+                        first_ty.rust(),
+                        ty.rust()
+                    ))
+                    .with_span(tsp.clone()));
+                }
+            }
+            types.insert(SpanKey::new(span), first_ty.clone());
+            Ok(TypedExpr {
+                expr: e.clone(),
+                ty: first_ty.clone(),
+                casts,
+                types,
+            })
+        }
         Expr::Call { op, args, span } => {
             let mut targs = Vec::new();
             let mut casts = Vec::new();
@@ -454,6 +626,37 @@ fn infer_expr_type(
                         }
                     }
                     let out_ty = Ty::Named(op.to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(TypedExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                _ if env.variants.contains_key(op) => {
+                    let (union_name, vdef) = env.variants.get(op).unwrap();
+                    if targs.len() != vdef.fields.len() {
+                        return Err(Diag::new(format!(
+                            "variant '{}' expects {} arguments",
+                            op,
+                            vdef.fields.len()
+                        ))
+                        .with_span(span.clone()));
+                    }
+                    for (idx, (arg, field)) in targs.iter().zip(vdef.fields.iter()).enumerate() {
+                        if arg.ty != field.ty {
+                            return Err(Diag::new(format!(
+                                "variant '{}' field '{}' expects '{}', got '{}'",
+                                op,
+                                field.name,
+                                field.ty.rust(),
+                                arg.ty.rust()
+                            ))
+                            .with_span(args[idx].span()));
+                        }
+                    }
+                    let out_ty = Ty::Named(union_name.clone());
                     types.insert(SpanKey::new(span), out_ty.clone());
                     Ok(TypedExpr {
                         expr: e.clone(),
