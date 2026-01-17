@@ -324,7 +324,10 @@ fn resolve_type(res: &Resolver, ty: &Ty, span: &Span) -> DslResult<Ty> {
 }
 
 fn is_primitive_type(name: &str) -> bool {
-    matches!(name, "i32" | "i64" | "u32" | "u64" | "f32" | "f64" | "bool" | "usize" | "isize" | "()")
+    matches!(
+        name,
+        "i32" | "i64" | "u32" | "u64" | "f32" | "f64" | "bool" | "usize" | "isize" | "()" | "string"
+    )
 }
 
 fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {

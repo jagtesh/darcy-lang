@@ -475,6 +475,17 @@ fn infer_expr_type(
                 types,
             })
         }
+        Expr::Str(_, sp) => {
+            let ty = InferTy::Named("string".to_string());
+            let mut types = BTreeMap::new();
+            types.insert(SpanKey::new(sp), ty.clone());
+            Ok(InferExpr {
+                expr: e.clone(),
+                ty,
+                casts: vec![],
+                types,
+            })
+        }
         Expr::Var(v, sp) => {
             let ty = vars
                 .get(v)

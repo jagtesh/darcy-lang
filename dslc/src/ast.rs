@@ -65,6 +65,7 @@ pub struct Param {
 pub enum Expr {
     Int(i64, Span),
     Float(f64, Span),
+    Str(String, Span),
     Var(String, Span),
     VecLit {
         elems: Vec<Expr>,
@@ -93,6 +94,7 @@ impl Expr {
         match self {
             Expr::Int(_, s) => s.clone(),
             Expr::Float(_, s) => s.clone(),
+            Expr::Str(_, s) => s.clone(),
             Expr::Var(_, s) => s.clone(),
             Expr::VecLit { span, .. } => span.clone(),
             Expr::Field { span, .. } => span.clone(),
@@ -164,7 +166,10 @@ fn parse_type_from_sym(s: &str) -> Ty {
 }
 
 fn is_primitive_type(name: &str) -> bool {
-    matches!(name, "i32" | "i64" | "u32" | "u64" | "f32" | "f64" | "bool" | "usize" | "isize" | "()")
+    matches!(
+        name,
+        "i32" | "i64" | "u32" | "u64" | "f32" | "f64" | "bool" | "usize" | "isize" | "()" | "string"
+    )
 }
 
 fn is_module_path(prefix: &str) -> bool {
@@ -474,6 +479,7 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
     match se {
         Sexp::Atom(TokKind::Int(v), sp) => Ok(Expr::Int(*v, sp.clone())),
         Sexp::Atom(TokKind::Float(v), sp) => Ok(Expr::Float(*v, sp.clone())),
+        Sexp::Atom(TokKind::Str(s), sp) => Ok(Expr::Str(s.clone(), sp.clone())),
         Sexp::Atom(TokKind::Sym(s), sp) => {
             if s.contains('/') {
                 return Err(Diag::new("qualified name is only allowed in call heads")

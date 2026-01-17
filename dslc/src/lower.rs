@@ -147,6 +147,10 @@ fn lower_expr(
             }
             s
         }
+        Expr::Str(s, _) => {
+            let lit = format!("{:?}", s);
+            format!("String::from({})", lit)
+        }
         Expr::Var(v, _) => v.clone(),
         Expr::VecLit { elems, ann, .. } => {
             if elems.is_empty() {

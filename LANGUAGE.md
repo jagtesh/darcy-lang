@@ -27,6 +27,7 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 ## Types
 
 - Primitives: `i32`, `i64`, `u32`, `u64`, `f32`, `f64`, `bool`, `usize`, `isize`, `()`.
+- Strings: `string` (lowered to `String`).
 - Vectors: `vec<T>` or `Vec<T>` in DSL type annotations (e.g. `vec<i32>`). The type name is case-insensitive.
 - Named types: structs and unions declared in the DSL or imported via modules.
 
