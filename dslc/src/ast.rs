@@ -276,11 +276,6 @@ fn is_reserved_ident(name: &str) -> bool {
             | "use"
             | "open"
             | "vec"
-            | "print"
-            | "spawn"
-            | "join"
-            | "par-map"
-            | "par-reduce"
     )
 }
 

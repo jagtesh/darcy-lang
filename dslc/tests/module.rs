@@ -67,11 +67,19 @@ fn use_only_rejects_missing_names() {
 fn dotted_module_prefix() {
     let root = temp_root("dotted");
     let lib_dir = root.join("lib");
-    let std_dir = lib_dir.join("std");
-    fs::create_dir_all(&std_dir).expect("create std dir");
-    fs::write(std_dir.join("io.dsl"), "(defn echo [x:i32] x)").expect("write module");
+    let acme_dir = lib_dir.join("acme");
+    fs::create_dir_all(&acme_dir).expect("create acme dir");
+    fs::write(acme_dir.join("io.dsl"), "(defn echo [x:i32] x)").expect("write module");
 
-    let src = "(use \"std/io\") (defn main [] (std.io/echo 1))";
+    let src = "(use \"acme/io\") (defn main [] (acme.io/echo 1))";
     let out = compile_with_modules(&root.join("main.dsl"), src, &[lib_dir]).expect("compile ok");
     assert!(out.contains("fn main"));
+}
+
+#[test]
+fn std_io_print_builtin_module() {
+    let root = temp_root("std_io");
+    let src = "(use \"std/io\") (defn main [] (std.io/print 1))";
+    let out = compile_with_modules(&root.join("main.dsl"), src, &[]).expect("compile ok");
+    assert!(out.contains("println!"));
 }

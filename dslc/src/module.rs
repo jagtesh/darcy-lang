@@ -73,6 +73,7 @@ impl ModuleLoader {
     fn resolve_all(&mut self) -> DslResult<()> {
         let mut pending: Vec<String> = self.modules.keys().cloned().collect();
         let mut idx = 0usize;
+        let builtin_defs = builtin_module_defs();
         while idx < pending.len() {
             let name = pending[idx].clone();
             idx += 1;
@@ -80,11 +81,16 @@ impl ModuleLoader {
             for u in uses {
                 let mod_name = module_name_from_import(&u.path)?;
                 if !self.modules.contains_key(&mod_name) {
-                    let path = self.find_module_path(&u.path)?;
-                    let src = std::fs::read_to_string(&path)
-                        .map_err(|e| Diag::new(format!("cannot read module {}: {}", u.path, e)))?;
-                    self.add_module(&mod_name, &src)?;
-                    pending.push(mod_name);
+                    if builtin_defs.contains_key(&mod_name) {
+                        self.add_builtin_module(&mod_name)?;
+                        pending.push(mod_name);
+                    } else {
+                        let path = self.find_module_path(&u.path)?;
+                        let src = std::fs::read_to_string(&path)
+                            .map_err(|e| Diag::new(format!("cannot read module {}: {}", u.path, e)))?;
+                        self.add_module(&mod_name, &src)?;
+                        pending.push(mod_name);
+                    }
                 }
             }
         }
@@ -96,12 +102,29 @@ impl ModuleLoader {
             self.defs.insert(name.clone(), defs);
         }
 
+        for (name, defs) in builtin_module_defs() {
+            self.defs.entry(name).or_insert(defs);
+        }
+
         let module_names: Vec<String> = self.modules.keys().cloned().collect();
         for name in module_names {
             let info = self.modules.get(&name).unwrap().clone();
             let resolved = resolve_module(&info, &self.defs)?;
             self.modules.get_mut(&name).unwrap().tops = resolved;
         }
+        Ok(())
+    }
+
+    fn add_builtin_module(&mut self, name: &str) -> DslResult<()> {
+        if self.modules.contains_key(name) {
+            return Ok(());
+        }
+        let info = ModuleInfo {
+            name: name.to_string(),
+            uses: Vec::new(),
+            tops: Vec::new(),
+        };
+        self.modules.insert(name.to_string(), info);
         Ok(())
     }
 
@@ -302,6 +325,40 @@ fn resolve_type(res: &Resolver, ty: &Ty, span: &Span) -> DslResult<Ty> {
 
 fn is_primitive_type(name: &str) -> bool {
     matches!(name, "i32" | "i64" | "u32" | "u64" | "f32" | "f64" | "bool" | "usize" | "isize" | "()")
+}
+
+fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
+    let mut out = BTreeMap::new();
+
+    let mut std_io = ModuleDefs {
+        types: BTreeSet::new(),
+        variants: BTreeSet::new(),
+        fns: BTreeSet::new(),
+    };
+    std_io.fns.insert("print".to_string());
+    out.insert("std.io".to_string(), std_io);
+
+    let mut core_num = ModuleDefs {
+        types: BTreeSet::new(),
+        variants: BTreeSet::new(),
+        fns: BTreeSet::new(),
+    };
+    core_num.fns.insert("abs".to_string());
+    core_num.fns.insert("min".to_string());
+    core_num.fns.insert("max".to_string());
+    core_num.fns.insert("clamp".to_string());
+    out.insert("core.num".to_string(), core_num);
+
+    let mut core_vec = ModuleDefs {
+        types: BTreeSet::new(),
+        variants: BTreeSet::new(),
+        fns: BTreeSet::new(),
+    };
+    core_vec.fns.insert("len".to_string());
+    core_vec.fns.insert("is-empty".to_string());
+    out.insert("core.vec".to_string(), core_vec);
+
+    out
 }
 
 fn qualify(module: &str, name: &str) -> String {

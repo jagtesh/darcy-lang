@@ -16,7 +16,7 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
   - Line: `; comment`
   - Block: `#| comment |#`
 - **Strings**: double-quoted, e.g. `"hello"`.
-- **Reserved keywords** (cannot be used as identifiers): `defn`, `defstruct`, `defunion`, `extern`, `match`, `use`, `open`, `vec`, `print`, `spawn`, `join`, `par-map`, `par-reduce`.
+- **Reserved keywords** (cannot be used as identifiers): `defn`, `defstruct`, `defunion`, `extern`, `match`, `use`, `open`, `vec`.
 
 ## Literals
 
@@ -146,6 +146,12 @@ Modules are files addressed by path strings and brought into scope with `use` or
 - Use qualified call heads for direct module access:
   - `(std.io/print 1)`
   - `(io/print 1)`
+
+### Built-in Modules (MVP)
+
+- `std/io`: `print`
+- `core/num`: `abs`, `min`, `max`, `clamp`
+- `core/vec`: `len`, `is-empty`
 
 ### Resolution Rules
 

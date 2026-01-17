@@ -697,11 +697,82 @@ fn infer_expr_type(
             }
 
             match op.as_str() {
-                "print" => {
+                "print" | "std.io/print" => {
                     if targs.len() != 1 {
                         return Err(Diag::new("'print' expects 1 argument").with_span(span.clone()));
                     }
                     let out_ty = InferTy::Named("()".to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.num/abs" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("'abs' expects 1 argument").with_span(span.clone()));
+                    }
+                    let out_ty = infer_numeric_unary(ctx, &targs[0].ty, &args[0].span(), span)?;
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.num/min" | "core.num/max" => {
+                    if targs.len() != 2 {
+                        return Err(Diag::new("min/max expects 2 arguments").with_span(span.clone()));
+                    }
+                    let (out_ty, extra_casts) =
+                        infer_numeric_minmax(ctx, &targs[0].ty, &targs[1].ty, &args[0].span(), &args[1].span(), span)?;
+                    casts.extend(extra_casts);
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.num/clamp" => {
+                    if targs.len() != 3 {
+                        return Err(Diag::new("'clamp' expects 3 arguments").with_span(span.clone()));
+                    }
+                    let (out_ty, extra_casts) =
+                        infer_numeric_clamp(ctx, &targs[0].ty, &targs[1].ty, &targs[2].ty, &args[0].span(), &args[1].span(), &args[2].span(), span)?;
+                    casts.extend(extra_casts);
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.vec/len" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("'len' expects 1 argument").with_span(span.clone()));
+                    }
+                    let _elem = ensure_vec_arg(ctx, &targs[0].ty, &args[0].span())?;
+                    let out_ty = InferTy::Named("usize".to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.vec/is-empty" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("'is-empty' expects 1 argument").with_span(span.clone()));
+                    }
+                    let _elem = ensure_vec_arg(ctx, &targs[0].ty, &args[0].span())?;
+                    let out_ty = InferTy::Named("bool".to_string());
                     types.insert(SpanKey::new(span), out_ty.clone());
                     Ok(InferExpr {
                         expr: e.clone(),
@@ -820,6 +891,110 @@ fn finalize_infer_expr(ctx: &InferCtx, expr: InferExpr) -> DslResult<TypedExpr> 
         casts: expr.casts,
         types,
     })
+}
+
+fn ensure_vec_arg(ctx: &mut InferCtx, ty: &InferTy, span: &Span) -> DslResult<InferTy> {
+    let resolved = ctx.resolve(ty);
+    match resolved {
+        InferTy::Vec(inner) => Ok(*inner),
+        InferTy::Var(_) => {
+            let elem = ctx.fresh_var();
+            let vec_ty = InferTy::Vec(Box::new(elem.clone()));
+            ctx.unify(&resolved, &vec_ty, span)?;
+            Ok(elem)
+        }
+        InferTy::Named(name) => Err(
+            Diag::new(format!("expected vector type, got '{}'", name)).with_span(span.clone()),
+        ),
+    }
+}
+
+fn infer_numeric_unary(
+    ctx: &mut InferCtx,
+    ty: &InferTy,
+    arg_sp: &Span,
+    op_sp: &Span,
+) -> DslResult<InferTy> {
+    let resolved = ctx.resolve(ty);
+    match resolved {
+        InferTy::Var(_) => Err(Diag::new(
+            "ambiguous numeric operator types; add a literal or annotation",
+        )
+        .with_span(op_sp.clone())),
+        InferTy::Vec(_) => Err(Diag::new("numeric operators expect scalars")
+            .with_span(arg_sp.clone())),
+        InferTy::Named(_) => {
+            let out = infer_to_ty(ctx, &resolved).ok_or_else(|| {
+                Diag::new("ambiguous numeric operator types").with_span(op_sp.clone())
+            })?;
+            if !is_numeric(&out) {
+                return Err(
+                    Diag::new(format!("operator expects numeric type, got '{}'", out.rust()))
+                        .with_span(arg_sp.clone()),
+                );
+            }
+            Ok(resolved)
+        }
+    }
+}
+
+fn infer_numeric_minmax(
+    ctx: &mut InferCtx,
+    a: &InferTy,
+    b: &InferTy,
+    a_sp: &Span,
+    b_sp: &Span,
+    op_sp: &Span,
+) -> DslResult<(InferTy, Vec<CastHint>)> {
+    let a_ty = infer_to_ty(ctx, &ctx.resolve(a)).ok_or_else(|| {
+        Diag::new("ambiguous numeric operator types; add a literal or annotation")
+            .with_span(op_sp.clone())
+    })?;
+    let b_ty = infer_to_ty(ctx, &ctx.resolve(b)).ok_or_else(|| {
+        Diag::new("ambiguous numeric operator types; add a literal or annotation")
+            .with_span(op_sp.clone())
+    })?;
+    if matches!(a_ty, Ty::Vec(_)) || matches!(b_ty, Ty::Vec(_)) {
+        return Err(Diag::new("min/max expects scalar numeric arguments").with_span(op_sp.clone()));
+    }
+    let (out_ty, casts) =
+        numeric_binop(&a_ty, &b_ty, a_sp, b_sp).map_err(|m| Diag::new(m).with_span(op_sp.clone()))?;
+    Ok((infer_from_ty(ctx, &out_ty), casts))
+}
+
+fn infer_numeric_clamp(
+    ctx: &mut InferCtx,
+    x: &InferTy,
+    min: &InferTy,
+    max: &InferTy,
+    x_sp: &Span,
+    min_sp: &Span,
+    max_sp: &Span,
+    op_sp: &Span,
+) -> DslResult<(InferTy, Vec<CastHint>)> {
+    let x_ty = infer_to_ty(ctx, &ctx.resolve(x)).ok_or_else(|| {
+        Diag::new("ambiguous numeric operator types; add a literal or annotation")
+            .with_span(op_sp.clone())
+    })?;
+    let min_ty = infer_to_ty(ctx, &ctx.resolve(min)).ok_or_else(|| {
+        Diag::new("ambiguous numeric operator types; add a literal or annotation")
+            .with_span(op_sp.clone())
+    })?;
+    let max_ty = infer_to_ty(ctx, &ctx.resolve(max)).ok_or_else(|| {
+        Diag::new("ambiguous numeric operator types; add a literal or annotation")
+            .with_span(op_sp.clone())
+    })?;
+    if matches!(x_ty, Ty::Vec(_)) || matches!(min_ty, Ty::Vec(_)) || matches!(max_ty, Ty::Vec(_)) {
+        return Err(Diag::new("clamp expects scalar numeric arguments").with_span(op_sp.clone()));
+    }
+
+    let (out_ty, casts) =
+        numeric_binop(&x_ty, &min_ty, x_sp, min_sp).map_err(|m| Diag::new(m).with_span(op_sp.clone()))?;
+    let (out_ty2, mut casts2) =
+        numeric_binop(&out_ty, &max_ty, x_sp, max_sp).map_err(|m| Diag::new(m).with_span(op_sp.clone()))?;
+    let mut all_casts = casts;
+    all_casts.append(&mut casts2);
+    Ok((infer_from_ty(ctx, &out_ty2), all_casts))
 }
 
 fn infer_numeric_binop(

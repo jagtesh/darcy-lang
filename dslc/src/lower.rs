@@ -230,11 +230,41 @@ fn lower_expr(
             rendered
         }
         Expr::Call { op, args, span: _ } => {
-            if op == "print" && args.len() == 1 {
+            if (op == "print" || op == "std.io/print") && args.len() == 1 {
                 return format!(
                     "println!(\"{{:?}}\", {})",
                     lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
                 );
+            }
+            if op == "core.vec/len" && args.len() == 1 {
+                return format!(
+                    "({}).len()",
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if op == "core.vec/is-empty" && args.len() == 1 {
+                return format!(
+                    "({}).is_empty()",
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if op == "core.num/abs" && args.len() == 1 {
+                return format!(
+                    "({}).abs()",
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if (op == "core.num/min" || op == "core.num/max") && args.len() == 2 {
+                let a = lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names);
+                let b = lower_expr(&args[1], casts, types, structs, variants, fn_names, type_names);
+                let meth = if op == "core.num/min" { "min" } else { "max" };
+                return format!("({}).{}({})", a, meth, b);
+            }
+            if op == "core.num/clamp" && args.len() == 3 {
+                let x = lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names);
+                let lo = lower_expr(&args[1], casts, types, structs, variants, fn_names, type_names);
+                let hi = lower_expr(&args[2], casts, types, structs, variants, fn_names, type_names);
+                return format!("({}).clamp({}, {})", x, lo, hi);
             }
             if let Some(sd) = structs.get(op) {
                 let rendered: Vec<String> = args
