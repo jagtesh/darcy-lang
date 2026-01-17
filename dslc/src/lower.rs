@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::ast::{Expr, MatchPat, StructDef, Top, Ty, VariantDef};
+use crate::ast::{Expr, MapKind, MatchPat, StructDef, Top, Ty, VariantDef};
 use crate::diag::{Diag, DslResult, Span};
 use crate::typed::{SpanKey, TypedFn};
 use crate::PipelineOutput;
@@ -152,6 +152,27 @@ fn lower_expr(
             format!("String::from({})", lit)
         }
         Expr::Var(v, _) => v.clone(),
+        Expr::MapLit { kind, entries, .. } => {
+            let map_ty = match kind {
+                MapKind::Hash => "std::collections::HashMap",
+                MapKind::BTree => "std::collections::BTreeMap",
+            };
+            let mut parts = Vec::new();
+            for (k, v) in entries {
+                let k = lower_expr(k, casts, types, structs, variants, fn_names, type_names);
+                let v = lower_expr(v, casts, types, structs, variants, fn_names, type_names);
+                parts.push(format!("__m.insert({}, {});", k, v));
+            }
+            if parts.is_empty() {
+                format!("{}::new()", map_ty)
+            } else {
+                format!(
+                    "{{ let mut __m = {}::new(); {} __m }}",
+                    map_ty,
+                    parts.join(" ")
+                )
+            }
+        }
         Expr::VecLit { elems, ann, .. } => {
             if elems.is_empty() {
                 if let Some(Ty::Vec(inner)) = ann {
@@ -285,6 +306,137 @@ fn lower_expr(
                 let sep =
                     lower_expr(&args[1], casts, types, structs, variants, fn_names, type_names);
                 return format!("({}).join(({}).as_str())", items, sep);
+            }
+            if op == "core.option/some" && args.len() == 1 {
+                return format!(
+                    "Some({})",
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if op == "core.option/none" && args.is_empty() {
+                return "None".to_string();
+            }
+            if op == "core.option/is-some" && args.len() == 1 {
+                return format!(
+                    "({}).is_some()",
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if op == "core.option/is-none" && args.len() == 1 {
+                return format!(
+                    "({}).is_none()",
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if op == "core.option/unwrap" && args.len() == 1 {
+                return format!(
+                    "({}).unwrap()",
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if op == "core.option/unwrap-or" && args.len() == 2 {
+                let opt =
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names);
+                let fallback =
+                    lower_expr(&args[1], casts, types, structs, variants, fn_names, type_names);
+                return format!("({}).unwrap_or({})", opt, fallback);
+            }
+            if op == "core.result/ok" && args.len() == 1 {
+                return format!(
+                    "Ok({})",
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if op == "core.result/err" && args.len() == 1 {
+                return format!(
+                    "Err({})",
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if op == "core.result/is-ok" && args.len() == 1 {
+                return format!(
+                    "({}).is_ok()",
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if op == "core.result/is-err" && args.len() == 1 {
+                return format!(
+                    "({}).is_err()",
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if op == "core.result/unwrap" && args.len() == 1 {
+                return format!(
+                    "({}).unwrap()",
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if op == "core.result/unwrap-or" && args.len() == 2 {
+                let res =
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names);
+                let fallback =
+                    lower_expr(&args[1], casts, types, structs, variants, fn_names, type_names);
+                return format!("({}).unwrap_or({})", res, fallback);
+            }
+            if op == "core.hashmap/get" || op == "core.btreemap/get" {
+                if args.len() == 2 {
+                    let map =
+                        lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names);
+                    let key =
+                        lower_expr(&args[1], casts, types, structs, variants, fn_names, type_names);
+                    return format!("({}).get(&{}).cloned()", map, key);
+                }
+            }
+            if op == "core.hashmap/contains" || op == "core.btreemap/contains" {
+                if args.len() == 2 {
+                    let map =
+                        lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names);
+                    let key =
+                        lower_expr(&args[1], casts, types, structs, variants, fn_names, type_names);
+                    return format!("({}).contains_key(&{})", map, key);
+                }
+            }
+            if op == "core.hashmap/len" || op == "core.btreemap/len" {
+                if args.len() == 1 {
+                    return format!(
+                        "({}).len()",
+                        lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                    );
+                }
+            }
+            if op == "core.hashmap/is-empty" || op == "core.btreemap/is-empty" {
+                if args.len() == 1 {
+                    return format!(
+                        "({}).is_empty()",
+                        lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                    );
+                }
+            }
+            if op == "core.hashmap/insert" || op == "core.btreemap/insert" {
+                if args.len() == 3 {
+                    let map =
+                        lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names);
+                    let key =
+                        lower_expr(&args[1], casts, types, structs, variants, fn_names, type_names);
+                    let val =
+                        lower_expr(&args[2], casts, types, structs, variants, fn_names, type_names);
+                    return format!(
+                        "{{ let mut __m = ({}).clone(); __m.insert({}, {}); __m }}",
+                        map, key, val
+                    );
+                }
+            }
+            if op == "core.hashmap/remove" || op == "core.btreemap/remove" {
+                if args.len() == 2 {
+                    let map =
+                        lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names);
+                    let key =
+                        lower_expr(&args[1], casts, types, structs, variants, fn_names, type_names);
+                    return format!(
+                        "{{ let mut __m = ({}).clone(); __m.remove(&{}); __m }}",
+                        map, key
+                    );
+                }
             }
             if op == "core.num/abs" && args.len() == 1 {
                 return format!(
@@ -449,9 +601,23 @@ fn ty_rust(ty: &Ty, type_names: &BTreeMap<String, String>) -> String {
         Ty::Named(s) => {
             if matches!(
                 s.as_str(),
-                "i32" | "i64" | "u32" | "u64" | "f32" | "f64" | "bool" | "usize" | "isize" | "()"
+                "i32"
+                    | "i64"
+                    | "u32"
+                    | "u64"
+                    | "f32"
+                    | "f64"
+                    | "bool"
+                    | "usize"
+                    | "isize"
+                    | "()"
+                    | "string"
             ) {
-                s.clone()
+                if s == "string" {
+                    "String".to_string()
+                } else {
+                    s.clone()
+                }
             } else {
                 type_names
                     .get(s)
@@ -460,6 +626,24 @@ fn ty_rust(ty: &Ty, type_names: &BTreeMap<String, String>) -> String {
             }
         }
         Ty::Vec(inner) => format!("Vec<{}>", ty_rust(inner, type_names)),
+        Ty::Option(inner) => format!("Option<{}>", ty_rust(inner, type_names)),
+        Ty::Result(ok, err) => format!(
+            "Result<{}, {}>",
+            ty_rust(ok, type_names),
+            ty_rust(err, type_names)
+        ),
+        Ty::Map(kind, k, v) => {
+            let name = match kind {
+                MapKind::Hash => "std::collections::HashMap",
+                MapKind::BTree => "std::collections::BTreeMap",
+            };
+            format!(
+                "{}<{}, {}>",
+                name,
+                ty_rust(k, type_names),
+                ty_rust(v, type_names)
+            )
+        }
         Ty::Unknown => "_".to_string(),
     }
 }

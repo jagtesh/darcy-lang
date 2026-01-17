@@ -28,6 +28,9 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 
 - Primitives: `i32`, `i64`, `u32`, `u64`, `f32`, `f64`, `bool`, `usize`, `isize`, `()`.
 - Strings: `string` (lowered to `String`).
+- Options: `option<T>`.
+- Results: `result<T,E>`.
+- Maps: `hashmap<K,V>` and `btreemap<K,V>`.
 - Vectors: `vec<T>` or `Vec<T>` in DSL type annotations (e.g. `vec<i32>`). The type name is case-insensitive.
 - Named types: structs and unions declared in the DSL or imported via modules.
 
@@ -119,6 +122,15 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
   - `(+ 2 [1 2 3])`
 - Vector-vector numeric ops are not supported.
 
+### Maps
+
+- Hash map literal:
+  - `(core.hashmap/new ("a" 1) ("b" 2))`
+- B-tree map literal:
+  - `(core.btreemap/new ("a" 1) ("b" 2))`
+- Empty map requires annotation:
+  - `(core.hashmap/new<string,i32>)`
+
 ## Modules and Imports
 
 Modules are files addressed by path strings and brought into scope with `use` or `open`.
@@ -154,6 +166,10 @@ Modules are files addressed by path strings and brought into scope with `use` or
 - `core/num`: `abs`, `min`, `max`, `clamp`
 - `core/vec`: `len`, `is-empty`
 - `core/str`: `len`, `is-empty`, `trim`, `split`, `join`
+- `core/option`: `some`, `none`, `is-some`, `is-none`, `unwrap`, `unwrap-or`
+- `core/result`: `ok`, `err`, `is-ok`, `is-err`, `unwrap`, `unwrap-or`
+- `core/hashmap`: `new`, `len`, `is-empty`, `get`, `contains`, `insert`, `remove`
+- `core/btreemap`: `new`, `len`, `is-empty`, `get`, `contains`, `insert`, `remove`
 
 ### Resolution Rules
 

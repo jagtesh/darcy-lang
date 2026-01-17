@@ -23,7 +23,7 @@ fn is_sym_start(c: char) -> bool {
 }
 
 fn is_sym_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || "_+-*/<>=!?.".contains(c) || c == ':' || c == '/'
+    c.is_ascii_alphanumeric() || "_+-*/<>=!?.".contains(c) || c == ':' || c == '/' || c == ','
 }
 
 pub fn lex(input: &str) -> DslResult<Vec<Tok>> {

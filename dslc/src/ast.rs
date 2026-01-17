@@ -6,7 +6,16 @@ use crate::parser::Sexp;
 pub enum Ty {
     Named(String),
     Vec(Box<Ty>),
+    Option(Box<Ty>),
+    Result(Box<Ty>, Box<Ty>),
+    Map(MapKind, Box<Ty>, Box<Ty>),
     Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapKind {
+    Hash,
+    BTree,
 }
 
 impl Ty {
@@ -14,6 +23,15 @@ impl Ty {
         match self {
             Ty::Named(s) => s.clone(),
             Ty::Vec(inner) => format!("Vec<{}>", inner.rust()),
+            Ty::Option(inner) => format!("Option<{}>", inner.rust()),
+            Ty::Result(ok, err) => format!("Result<{}, {}>", ok.rust(), err.rust()),
+            Ty::Map(kind, k, v) => {
+                let ty = match kind {
+                    MapKind::Hash => "std::collections::HashMap",
+                    MapKind::BTree => "std::collections::BTreeMap",
+                };
+                format!("{}<{}, {}>", ty, k.rust(), v.rust())
+            }
             Ty::Unknown => "_".to_string(),
         }
     }
@@ -87,6 +105,12 @@ pub enum Expr {
         args: Vec<Expr>,
         span: Span,
     },
+    MapLit {
+        kind: MapKind,
+        entries: Vec<(Expr, Expr)>,
+        span: Span,
+        ann: Option<(Ty, Ty)>,
+    },
 }
 
 impl Expr {
@@ -100,6 +124,7 @@ impl Expr {
             Expr::Field { span, .. } => span.clone(),
             Expr::Match { span, .. } => span.clone(),
             Expr::Call { span, .. } => span.clone(),
+            Expr::MapLit { span, .. } => span.clone(),
         }
     }
 }
@@ -157,18 +182,85 @@ fn atom_sym(se: &Sexp) -> Option<(String, Span)> {
 }
 
 fn parse_type_from_sym(s: &str) -> Ty {
-    if s.len() >= 4 && s[..4].eq_ignore_ascii_case("vec<") && s.ends_with('>') {
-        let inner = &s[4..s.len() - 1];
+    if let Some(inner) = parse_generic_inner(s, "vec") {
         let inner_ty = parse_type_from_sym(inner);
         return Ty::Vec(Box::new(inner_ty));
     }
+    if let Some(inner) = parse_generic_inner(s, "option") {
+        let inner_ty = parse_type_from_sym(inner);
+        return Ty::Option(Box::new(inner_ty));
+    }
+    if let Some(inner) = parse_generic_inner(s, "result") {
+        let args = split_type_args(inner);
+        if args.len() == 2 {
+            let ok = parse_type_from_sym(args[0]);
+            let err = parse_type_from_sym(args[1]);
+            return Ty::Result(Box::new(ok), Box::new(err));
+        }
+    }
+    if let Some(inner) = parse_generic_inner(s, "hashmap") {
+        let args = split_type_args(inner);
+        if args.len() == 2 {
+            let k = parse_type_from_sym(args[0]);
+            let v = parse_type_from_sym(args[1]);
+            return Ty::Map(MapKind::Hash, Box::new(k), Box::new(v));
+        }
+    }
+    if let Some(inner) = parse_generic_inner(s, "btreemap") {
+        let args = split_type_args(inner);
+        if args.len() == 2 {
+            let k = parse_type_from_sym(args[0]);
+            let v = parse_type_from_sym(args[1]);
+            return Ty::Map(MapKind::BTree, Box::new(k), Box::new(v));
+        }
+    }
     Ty::Named(s.to_string())
+}
+
+fn parse_generic_inner<'a>(s: &'a str, name: &str) -> Option<&'a str> {
+    if s.len() <= name.len() + 2 {
+        return None;
+    }
+    let (head, tail) = s.split_at(name.len() + 1);
+    if !head[..name.len()].eq_ignore_ascii_case(name) || !head.ends_with('<') || !tail.ends_with('>') {
+        return None;
+    }
+    Some(&tail[..tail.len() - 1])
+}
+
+fn split_type_args(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(s[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(s[start..].trim());
+    out
 }
 
 fn is_primitive_type(name: &str) -> bool {
     matches!(
         name,
-        "i32" | "i64" | "u32" | "u64" | "f32" | "f64" | "bool" | "usize" | "isize" | "()" | "string"
+        "i32"
+            | "i64"
+            | "u32"
+            | "u64"
+            | "f32"
+            | "f64"
+            | "bool"
+            | "usize"
+            | "isize"
+            | "()"
+            | "string"
     )
 }
 
@@ -230,6 +322,37 @@ fn parse_type_from_sym_checked(s: &str, sp: &Span) -> DslResult<Ty> {
             }
             _ => Ok(ty),
         },
+        Ty::Option(inner) => match inner.as_ref() {
+            Ty::Named(n) => {
+                if is_primitive_type(n) {
+                    Ok(ty)
+                } else {
+                    let _ = ensure_type_name(n, sp)?;
+                    Ok(ty)
+                }
+            }
+            _ => Ok(ty),
+        },
+        Ty::Result(ok, err) => {
+            for t in [ok.as_ref(), err.as_ref()] {
+                if let Ty::Named(n) = t {
+                    if !is_primitive_type(n) {
+                        let _ = ensure_type_name(n, sp)?;
+                    }
+                }
+            }
+            Ok(ty)
+        }
+        Ty::Map(_, k, v) => {
+            for t in [k.as_ref(), v.as_ref()] {
+                if let Ty::Named(n) = t {
+                    if !is_primitive_type(n) {
+                        let _ = ensure_type_name(n, sp)?;
+                    }
+                }
+            }
+            Ok(ty)
+        }
         Ty::Unknown => Ok(ty),
     }
 }
@@ -511,6 +634,63 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
             }
             let (op, op_span) = atom_sym(&items[0])
                 .ok_or_else(|| Diag::new("call head must be a symbol").with_span(se_span(&items[0])))?;
+            if op.starts_with("core.hashmap/new") || op.starts_with("core.btreemap/new") {
+                let (kind, ann) = if let Some(inner) = op.strip_prefix("core.hashmap/new<") {
+                    let inner = inner.strip_suffix('>').ok_or_else(|| {
+                        Diag::new("map constructor type annotation must end with '>'")
+                            .with_span(op_span.clone())
+                    })?;
+                    let args = split_type_args(inner);
+                    if args.len() != 2 {
+                        return Err(Diag::new("map type annotation must be hashmap<K,V>")
+                            .with_span(op_span.clone()));
+                    }
+                    let k = parse_type_from_sym_checked(args[0], &op_span)?;
+                    let v = parse_type_from_sym_checked(args[1], &op_span)?;
+                    (MapKind::Hash, Some((k, v)))
+                } else if let Some(inner) = op.strip_prefix("core.btreemap/new<") {
+                    let inner = inner.strip_suffix('>').ok_or_else(|| {
+                        Diag::new("map constructor type annotation must end with '>'")
+                            .with_span(op_span.clone())
+                    })?;
+                    let args = split_type_args(inner);
+                    if args.len() != 2 {
+                        return Err(Diag::new("map type annotation must be btreemap<K,V>")
+                            .with_span(op_span.clone()));
+                    }
+                    let k = parse_type_from_sym_checked(args[0], &op_span)?;
+                    let v = parse_type_from_sym_checked(args[1], &op_span)?;
+                    (MapKind::BTree, Some((k, v)))
+                } else if op == "core.hashmap/new" {
+                    (MapKind::Hash, None)
+                } else {
+                    (MapKind::BTree, None)
+                };
+
+                let mut entries = Vec::new();
+                for item in items.iter().skip(1) {
+                    let (pair, pspan) = match item {
+                        Sexp::List(v, sp) => (v, sp.clone()),
+                        _ => {
+                            return Err(
+                                Diag::new("map entry must be (key value)").with_span(se_span(item))
+                            )
+                        }
+                    };
+                    if pair.len() != 2 {
+                        return Err(Diag::new("map entry must be (key value)").with_span(pspan));
+                    }
+                    let key = parse_expr(&pair[0])?;
+                    let val = parse_expr(&pair[1])?;
+                    entries.push((key, val));
+                }
+                return Ok(Expr::MapLit {
+                    kind,
+                    entries,
+                    span: span.clone(),
+                    ann,
+                });
+            }
             if op == "match" {
                 return parse_match(span, &items[1..]);
             }

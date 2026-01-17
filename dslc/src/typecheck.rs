@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::ast::{Expr, FnDef, MatchPat, StructDef, Top, Ty, UnionDef, VariantDef};
+use crate::ast::{Expr, FnDef, MapKind, MatchPat, StructDef, Top, Ty, UnionDef, VariantDef};
 use crate::diag::{Diag, DslResult, Span};
 use crate::typed::{CastHint, SpanKey, TypedExpr, TypedFn};
 
@@ -97,6 +97,9 @@ enum InferTy {
     Var(u32),
     Named(String),
     Vec(Box<InferTy>),
+    Option(Box<InferTy>),
+    Result(Box<InferTy>, Box<InferTy>),
+    Map(MapKind, Box<InferTy>, Box<InferTy>),
 }
 
 #[derive(Debug, Clone)]
@@ -133,6 +136,13 @@ impl InferCtx {
                 None => InferTy::Var(*id),
             },
             InferTy::Vec(inner) => InferTy::Vec(Box::new(self.resolve(inner))),
+            InferTy::Option(inner) => InferTy::Option(Box::new(self.resolve(inner))),
+            InferTy::Result(ok, err) => {
+                InferTy::Result(Box::new(self.resolve(ok)), Box::new(self.resolve(err)))
+            }
+            InferTy::Map(kind, k, v) => {
+                InferTy::Map(kind.clone(), Box::new(self.resolve(k)), Box::new(self.resolve(v)))
+            }
             InferTy::Named(n) => InferTy::Named(n.clone()),
         }
     }
@@ -141,6 +151,9 @@ impl InferCtx {
         match self.resolve(ty) {
             InferTy::Var(other) => other == id,
             InferTy::Vec(inner) => self.occurs(id, &inner),
+            InferTy::Option(inner) => self.occurs(id, &inner),
+            InferTy::Result(ok, err) => self.occurs(id, &ok) || self.occurs(id, &err),
+            InferTy::Map(_, k, v) => self.occurs(id, &k) || self.occurs(id, &v),
             InferTy::Named(_) => false,
         }
     }
@@ -166,8 +179,29 @@ impl InferCtx {
                 }
             }
             (InferTy::Vec(a), InferTy::Vec(b)) => self.unify(&a, &b, span),
+            (InferTy::Option(a), InferTy::Option(b)) => self.unify(&a, &b, span),
+            (InferTy::Result(a_ok, a_err), InferTy::Result(b_ok, b_err)) => {
+                self.unify(&a_ok, &b_ok, span)?;
+                self.unify(&a_err, &b_err, span)
+            }
+            (InferTy::Map(ka, a_k, a_v), InferTy::Map(kb, b_k, b_v)) => {
+                if ka != kb {
+                    return Err(Diag::new("type mismatch: map kind differs").with_span(span.clone()));
+                }
+                self.unify(&a_k, &b_k, span)?;
+                self.unify(&a_v, &b_v, span)
+            }
             (InferTy::Vec(_), InferTy::Named(_)) | (InferTy::Named(_), InferTy::Vec(_)) => {
                 Err(Diag::new("type mismatch: vector vs scalar").with_span(span.clone()))
+            }
+            (InferTy::Option(_), _) | (_, InferTy::Option(_)) => {
+                Err(Diag::new("type mismatch: option vs scalar").with_span(span.clone()))
+            }
+            (InferTy::Result(_, _), _) | (_, InferTy::Result(_, _)) => {
+                Err(Diag::new("type mismatch: result vs scalar").with_span(span.clone()))
+            }
+            (InferTy::Map(_, _, _), _) | (_, InferTy::Map(_, _, _)) => {
+                Err(Diag::new("type mismatch: map vs scalar").with_span(span.clone()))
             }
         }
     }
@@ -177,6 +211,16 @@ fn infer_from_ty(ctx: &mut InferCtx, ty: &Ty) -> InferTy {
     match ty {
         Ty::Named(n) => InferTy::Named(n.clone()),
         Ty::Vec(inner) => InferTy::Vec(Box::new(infer_from_ty(ctx, inner))),
+        Ty::Option(inner) => InferTy::Option(Box::new(infer_from_ty(ctx, inner))),
+        Ty::Result(ok, err) => InferTy::Result(
+            Box::new(infer_from_ty(ctx, ok)),
+            Box::new(infer_from_ty(ctx, err)),
+        ),
+        Ty::Map(kind, k, v) => InferTy::Map(
+            kind.clone(),
+            Box::new(infer_from_ty(ctx, k)),
+            Box::new(infer_from_ty(ctx, v)),
+        ),
         Ty::Unknown => ctx.fresh_var(),
     }
 }
@@ -186,6 +230,20 @@ fn infer_to_ty(ctx: &InferCtx, ty: &InferTy) -> Option<Ty> {
         InferTy::Var(_) => None,
         InferTy::Named(n) => Some(Ty::Named(n)),
         InferTy::Vec(inner) => infer_to_ty(ctx, &inner).map(|t| Ty::Vec(Box::new(t))),
+        InferTy::Option(inner) => {
+            let inner = infer_to_ty(ctx, &inner).unwrap_or(Ty::Unknown);
+            Some(Ty::Option(Box::new(inner)))
+        }
+        InferTy::Result(ok, err) => {
+            let ok = infer_to_ty(ctx, &ok).unwrap_or(Ty::Unknown);
+            let err = infer_to_ty(ctx, &err).unwrap_or(Ty::Unknown);
+            Some(Ty::Result(Box::new(ok), Box::new(err)))
+        }
+        InferTy::Map(kind, k, v) => {
+            let k = infer_to_ty(ctx, &k).unwrap_or(Ty::Unknown);
+            let v = infer_to_ty(ctx, &v).unwrap_or(Ty::Unknown);
+            Some(Ty::Map(kind, Box::new(k), Box::new(v)))
+        }
     }
 }
 
@@ -194,6 +252,17 @@ fn infer_ty_rust(ctx: &InferCtx, ty: &InferTy) -> String {
         InferTy::Var(id) => format!("'t{}", id),
         InferTy::Named(n) => n,
         InferTy::Vec(inner) => format!("Vec<{}>", infer_ty_rust(ctx, &inner)),
+        InferTy::Option(inner) => format!("Option<{}>", infer_ty_rust(ctx, &inner)),
+        InferTy::Result(ok, err) => {
+            format!("Result<{}, {}>", infer_ty_rust(ctx, &ok), infer_ty_rust(ctx, &err))
+        }
+        InferTy::Map(kind, k, v) => {
+            let name = match kind {
+                MapKind::Hash => "HashMap",
+                MapKind::BTree => "BTreeMap",
+            };
+            format!("{}<{}, {}>", name, infer_ty_rust(ctx, &k), infer_ty_rust(ctx, &v))
+        }
     }
 }
 
@@ -382,6 +451,10 @@ fn infer_param_types(
                         return Err(Diag::new("cannot access field on nested vector type")
                             .with_span(param_spans[&p].clone()))
                     }
+                    InferTy::Option(_) | InferTy::Result(_, _) | InferTy::Map(_, _, _) => {
+                        return Err(Diag::new("cannot access field on non-struct vector type")
+                            .with_span(param_spans[&p].clone()))
+                    }
                 };
                 let sd = env.structs.get(&ty_name).ok_or_else(|| {
                     Diag::new(format!("unknown type '{}'", ty_name))
@@ -397,6 +470,10 @@ fn infer_param_types(
                     }
                 }
                 continue;
+            }
+            InferTy::Option(_) | InferTy::Result(_, _) | InferTy::Map(_, _, _) => {
+                return Err(Diag::new("cannot access field on non-struct type")
+                    .with_span(param_spans[&p].clone()))
             }
             InferTy::Var(_) => {}
         }
@@ -548,6 +625,60 @@ fn infer_expr_type(
                 types,
             })
         }
+        Expr::MapLit {
+            kind,
+            entries,
+            span,
+            ann,
+        } => {
+            let mut casts = Vec::new();
+            let mut types = BTreeMap::new();
+            let mut key_ty = None::<InferTy>;
+            let mut val_ty = None::<InferTy>;
+
+            if entries.is_empty() && ann.is_none() {
+                return Err(Diag::new(
+                    "cannot infer map type from empty literal; add hashmap<K,V> annotation",
+                )
+                .with_span(span.clone()));
+            }
+
+            if let Some((k, v)) = ann {
+                key_ty = Some(infer_from_ty(ctx, k));
+                val_ty = Some(infer_from_ty(ctx, v));
+            }
+
+            for (k, v) in entries {
+                let tk = infer_expr_type(env, fns, ctx, vars, k)?;
+                let tv = infer_expr_type(env, fns, ctx, vars, v)?;
+                casts.extend(tk.casts.clone());
+                casts.extend(tv.casts.clone());
+                types.extend(tk.types);
+                types.extend(tv.types);
+
+                if let Some(ref cur_k) = key_ty {
+                    ctx.unify(cur_k, &tk.ty, &k.span())?;
+                } else {
+                    key_ty = Some(tk.ty.clone());
+                }
+                if let Some(ref cur_v) = val_ty {
+                    ctx.unify(cur_v, &tv.ty, &v.span())?;
+                } else {
+                    val_ty = Some(tv.ty.clone());
+                }
+            }
+
+            let key_ty = key_ty.unwrap_or_else(|| ctx.fresh_var());
+            let val_ty = val_ty.unwrap_or_else(|| ctx.fresh_var());
+            let out_ty = InferTy::Map(kind.clone(), Box::new(key_ty), Box::new(val_ty));
+            types.insert(SpanKey::new(span), out_ty.clone());
+            Ok(InferExpr {
+                expr: e.clone(),
+                ty: out_ty,
+                casts,
+                types,
+            })
+        }
         Expr::Field { base, field, span } => {
             let tb = infer_expr_type(env, fns, ctx, vars, base)?;
             let base_ty = ctx.resolve(&tb.ty);
@@ -563,10 +694,19 @@ fn infer_expr_type(
                         return Err(Diag::new("cannot access field on nested vector type")
                             .with_span(span.clone()))
                     }
+                    InferTy::Option(_) | InferTy::Result(_, _) | InferTy::Map(_, _, _) => {
+                        return Err(Diag::new("cannot access field on non-struct vector type")
+                            .with_span(span.clone()))
+                    }
                 },
                 InferTy::Var(_) => {
                     return Err(
                         Diag::new("cannot access field on unknown type").with_span(span.clone()),
+                    )
+                }
+                InferTy::Option(_) | InferTy::Result(_, _) | InferTy::Map(_, _, _) => {
+                    return Err(
+                        Diag::new("cannot access field on non-struct type").with_span(span.clone()),
                     )
                 }
             };
@@ -609,6 +749,9 @@ fn infer_expr_type(
                 }
                 InferTy::Vec(_) => {
                     return Err(Diag::new("cannot match on vector type").with_span(span.clone()))
+                }
+                InferTy::Option(_) | InferTy::Result(_, _) | InferTy::Map(_, _, _) => {
+                    return Err(Diag::new("cannot match on non-union type").with_span(span.clone()))
                 }
             };
             if !env.unions.contains_key(&union_name) {
@@ -865,6 +1008,264 @@ fn infer_expr_type(
                         types,
                     })
                 }
+                "core.option/some" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("'some' expects 1 argument").with_span(span.clone()));
+                    }
+                    let inner = targs[0].ty.clone();
+                    let out_ty = InferTy::Option(Box::new(inner));
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.option/none" => {
+                    if !targs.is_empty() {
+                        return Err(Diag::new("'none' expects 0 arguments").with_span(span.clone()));
+                    }
+                    let out_ty = InferTy::Option(Box::new(ctx.fresh_var()));
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.option/is-some" | "core.option/is-none" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("option predicate expects 1 argument").with_span(span.clone()));
+                    }
+                    let _ = ensure_option_arg(ctx, &targs[0].ty, &args[0].span())?;
+                    let out_ty = InferTy::Named("bool".to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.option/unwrap" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("'unwrap' expects 1 argument").with_span(span.clone()));
+                    }
+                    let inner = ensure_option_arg(ctx, &targs[0].ty, &args[0].span())?;
+                    types.insert(SpanKey::new(span), inner.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: inner,
+                        casts,
+                        types,
+                    })
+                }
+                "core.option/unwrap-or" => {
+                    if targs.len() != 2 {
+                        return Err(Diag::new("'unwrap-or' expects 2 arguments").with_span(span.clone()));
+                    }
+                    let inner = ensure_option_arg(ctx, &targs[0].ty, &args[0].span())?;
+                    ctx.unify(&inner, &targs[1].ty, &args[1].span())?;
+                    types.insert(SpanKey::new(span), inner.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: inner,
+                        casts,
+                        types,
+                    })
+                }
+                "core.result/ok" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("'ok' expects 1 argument").with_span(span.clone()));
+                    }
+                    let ok = targs[0].ty.clone();
+                    let err = ctx.fresh_var();
+                    let out_ty = InferTy::Result(Box::new(ok), Box::new(err));
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.result/err" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("'err' expects 1 argument").with_span(span.clone()));
+                    }
+                    let err = targs[0].ty.clone();
+                    let ok = ctx.fresh_var();
+                    let out_ty = InferTy::Result(Box::new(ok), Box::new(err));
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.result/is-ok" | "core.result/is-err" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("result predicate expects 1 argument").with_span(span.clone()));
+                    }
+                    let _ = ensure_result_arg(ctx, &targs[0].ty, &args[0].span())?;
+                    let out_ty = InferTy::Named("bool".to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.result/unwrap" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("'unwrap' expects 1 argument").with_span(span.clone()));
+                    }
+                    let (ok, _err) = ensure_result_arg(ctx, &targs[0].ty, &args[0].span())?;
+                    types.insert(SpanKey::new(span), ok.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: ok,
+                        casts,
+                        types,
+                    })
+                }
+                "core.result/unwrap-or" => {
+                    if targs.len() != 2 {
+                        return Err(Diag::new("'unwrap-or' expects 2 arguments").with_span(span.clone()));
+                    }
+                    let (ok, _err) = ensure_result_arg(ctx, &targs[0].ty, &args[0].span())?;
+                    ctx.unify(&ok, &targs[1].ty, &args[1].span())?;
+                    types.insert(SpanKey::new(span), ok.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: ok,
+                        casts,
+                        types,
+                    })
+                }
+                "core.hashmap/len" | "core.btreemap/len" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("'len' expects 1 argument").with_span(span.clone()));
+                    }
+                    let kind = if op.starts_with("core.hashmap/") {
+                        MapKind::Hash
+                    } else {
+                        MapKind::BTree
+                    };
+                    let _ = ensure_map_arg(ctx, &targs[0].ty, kind, &args[0].span())?;
+                    let out_ty = InferTy::Named("usize".to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.hashmap/is-empty" | "core.btreemap/is-empty" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("'is-empty' expects 1 argument").with_span(span.clone()));
+                    }
+                    let kind = if op.starts_with("core.hashmap/") {
+                        MapKind::Hash
+                    } else {
+                        MapKind::BTree
+                    };
+                    let _ = ensure_map_arg(ctx, &targs[0].ty, kind, &args[0].span())?;
+                    let out_ty = InferTy::Named("bool".to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.hashmap/get" | "core.btreemap/get" => {
+                    if targs.len() != 2 {
+                        return Err(Diag::new("'get' expects 2 arguments").with_span(span.clone()));
+                    }
+                    let kind = if op.starts_with("core.hashmap/") {
+                        MapKind::Hash
+                    } else {
+                        MapKind::BTree
+                    };
+                    let (k, v) = ensure_map_arg(ctx, &targs[0].ty, kind, &args[0].span())?;
+                    ctx.unify(&k, &targs[1].ty, &args[1].span())?;
+                    let out_ty = InferTy::Option(Box::new(v));
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.hashmap/contains" | "core.btreemap/contains" => {
+                    if targs.len() != 2 {
+                        return Err(Diag::new("'contains' expects 2 arguments").with_span(span.clone()));
+                    }
+                    let kind = if op.starts_with("core.hashmap/") {
+                        MapKind::Hash
+                    } else {
+                        MapKind::BTree
+                    };
+                    let (k, _v) = ensure_map_arg(ctx, &targs[0].ty, kind, &args[0].span())?;
+                    ctx.unify(&k, &targs[1].ty, &args[1].span())?;
+                    let out_ty = InferTy::Named("bool".to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.hashmap/insert" | "core.btreemap/insert" => {
+                    if targs.len() != 3 {
+                        return Err(Diag::new("'insert' expects 3 arguments").with_span(span.clone()));
+                    }
+                    let kind = if op.starts_with("core.hashmap/") {
+                        MapKind::Hash
+                    } else {
+                        MapKind::BTree
+                    };
+                    let (k, v) = ensure_map_arg(ctx, &targs[0].ty, kind, &args[0].span())?;
+                    ctx.unify(&k, &targs[1].ty, &args[1].span())?;
+                    ctx.unify(&v, &targs[2].ty, &args[2].span())?;
+                    let out_ty = InferTy::Map(kind, Box::new(k), Box::new(v));
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.hashmap/remove" | "core.btreemap/remove" => {
+                    if targs.len() != 2 {
+                        return Err(Diag::new("'remove' expects 2 arguments").with_span(span.clone()));
+                    }
+                    let kind = if op.starts_with("core.hashmap/") {
+                        MapKind::Hash
+                    } else {
+                        MapKind::BTree
+                    };
+                    let (k, v) = ensure_map_arg(ctx, &targs[0].ty, kind, &args[0].span())?;
+                    ctx.unify(&k, &targs[1].ty, &args[1].span())?;
+                    let out_ty = InferTy::Map(kind, Box::new(k), Box::new(v));
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
                 _ if env.structs.contains_key(op) => {
                     let sd = env.structs.get(op).unwrap();
                     if targs.len() != sd.fields.len() {
@@ -990,6 +1391,9 @@ fn ensure_vec_arg(ctx: &mut InferCtx, ty: &InferTy, span: &Span) -> DslResult<In
         InferTy::Named(name) => Err(
             Diag::new(format!("expected vector type, got '{}'", name)).with_span(span.clone()),
         ),
+        InferTy::Option(_) | InferTy::Result(_, _) | InferTy::Map(_, _, _) => {
+            Err(Diag::new("expected vector type").with_span(span.clone()))
+        }
     }
 }
 
@@ -1005,9 +1409,65 @@ fn ensure_string_arg(ctx: &mut InferCtx, ty: &InferTy, span: &Span) -> DslResult
             Diag::new(format!("expected string type, got '{}'", name)).with_span(span.clone()),
         ),
         InferTy::Vec(_) => Err(Diag::new("expected string type, got vector").with_span(span.clone())),
+        InferTy::Option(_) | InferTy::Result(_, _) | InferTy::Map(_, _, _) => {
+            Err(Diag::new("expected string type").with_span(span.clone()))
+        }
     }
 }
 
+fn ensure_option_arg(ctx: &mut InferCtx, ty: &InferTy, span: &Span) -> DslResult<InferTy> {
+    let resolved = ctx.resolve(ty);
+    match resolved {
+        InferTy::Option(inner) => Ok(*inner),
+        InferTy::Var(_) => {
+            let inner = ctx.fresh_var();
+            let opt = InferTy::Option(Box::new(inner.clone()));
+            ctx.unify(&resolved, &opt, span)?;
+            Ok(inner)
+        }
+        _ => Err(Diag::new("expected option type").with_span(span.clone())),
+    }
+}
+
+fn ensure_result_arg(ctx: &mut InferCtx, ty: &InferTy, span: &Span) -> DslResult<(InferTy, InferTy)> {
+    let resolved = ctx.resolve(ty);
+    match resolved {
+        InferTy::Result(ok, err) => Ok((*ok, *err)),
+        InferTy::Var(_) => {
+            let ok = ctx.fresh_var();
+            let err = ctx.fresh_var();
+            let res = InferTy::Result(Box::new(ok.clone()), Box::new(err.clone()));
+            ctx.unify(&resolved, &res, span)?;
+            Ok((ok, err))
+        }
+        _ => Err(Diag::new("expected result type").with_span(span.clone())),
+    }
+}
+
+fn ensure_map_arg(
+    ctx: &mut InferCtx,
+    ty: &InferTy,
+    kind: MapKind,
+    span: &Span,
+) -> DslResult<(InferTy, InferTy)> {
+    let resolved = ctx.resolve(ty);
+    match resolved {
+        InferTy::Map(k, kty, vty) => {
+            if k != kind {
+                return Err(Diag::new("map kind mismatch").with_span(span.clone()));
+            }
+            Ok((*kty, *vty))
+        }
+        InferTy::Var(_) => {
+            let k = ctx.fresh_var();
+            let v = ctx.fresh_var();
+            let map = InferTy::Map(kind, Box::new(k.clone()), Box::new(v.clone()));
+            ctx.unify(&resolved, &map, span)?;
+            Ok((k, v))
+        }
+        _ => Err(Diag::new("expected map type").with_span(span.clone())),
+    }
+}
 fn infer_numeric_unary(
     ctx: &mut InferCtx,
     ty: &InferTy,
@@ -1022,6 +1482,9 @@ fn infer_numeric_unary(
         .with_span(op_sp.clone())),
         InferTy::Vec(_) => Err(Diag::new("numeric operators expect scalars")
             .with_span(arg_sp.clone())),
+        InferTy::Option(_) | InferTy::Result(_, _) | InferTy::Map(_, _, _) => Err(
+            Diag::new("numeric operators expect scalars").with_span(arg_sp.clone()),
+        ),
         InferTy::Named(_) => {
             let out = infer_to_ty(ctx, &resolved).ok_or_else(|| {
                 Diag::new("ambiguous numeric operator types").with_span(op_sp.clone())

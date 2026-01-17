@@ -319,6 +319,16 @@ fn resolve_type(res: &Resolver, ty: &Ty, span: &Span) -> DslResult<Ty> {
             Ok(Ty::Named(full))
         }
         Ty::Vec(inner) => Ok(Ty::Vec(Box::new(resolve_type(res, inner, span)?))),
+        Ty::Option(inner) => Ok(Ty::Option(Box::new(resolve_type(res, inner, span)?))),
+        Ty::Result(ok, err) => Ok(Ty::Result(
+            Box::new(resolve_type(res, ok, span)?),
+            Box::new(resolve_type(res, err, span)?),
+        )),
+        Ty::Map(kind, k, v) => Ok(Ty::Map(
+            kind.clone(),
+            Box::new(resolve_type(res, k, span)?),
+            Box::new(resolve_type(res, v, span)?),
+        )),
         Ty::Unknown => Ok(ty.clone()),
     }
 }
@@ -372,6 +382,60 @@ fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
     core_str.fns.insert("split".to_string());
     core_str.fns.insert("join".to_string());
     out.insert("core.str".to_string(), core_str);
+
+    let mut core_option = ModuleDefs {
+        types: BTreeSet::new(),
+        variants: BTreeSet::new(),
+        fns: BTreeSet::new(),
+    };
+    core_option.fns.insert("some".to_string());
+    core_option.fns.insert("none".to_string());
+    core_option.fns.insert("is-some".to_string());
+    core_option.fns.insert("is-none".to_string());
+    core_option.fns.insert("unwrap".to_string());
+    core_option.fns.insert("unwrap-or".to_string());
+    out.insert("core.option".to_string(), core_option);
+
+    let mut core_result = ModuleDefs {
+        types: BTreeSet::new(),
+        variants: BTreeSet::new(),
+        fns: BTreeSet::new(),
+    };
+    core_result.fns.insert("ok".to_string());
+    core_result.fns.insert("err".to_string());
+    core_result.fns.insert("is-ok".to_string());
+    core_result.fns.insert("is-err".to_string());
+    core_result.fns.insert("unwrap".to_string());
+    core_result.fns.insert("unwrap-or".to_string());
+    out.insert("core.result".to_string(), core_result);
+
+    let mut core_hashmap = ModuleDefs {
+        types: BTreeSet::new(),
+        variants: BTreeSet::new(),
+        fns: BTreeSet::new(),
+    };
+    core_hashmap.fns.insert("new".to_string());
+    core_hashmap.fns.insert("len".to_string());
+    core_hashmap.fns.insert("is-empty".to_string());
+    core_hashmap.fns.insert("get".to_string());
+    core_hashmap.fns.insert("contains".to_string());
+    core_hashmap.fns.insert("insert".to_string());
+    core_hashmap.fns.insert("remove".to_string());
+    out.insert("core.hashmap".to_string(), core_hashmap);
+
+    let mut core_btreemap = ModuleDefs {
+        types: BTreeSet::new(),
+        variants: BTreeSet::new(),
+        fns: BTreeSet::new(),
+    };
+    core_btreemap.fns.insert("new".to_string());
+    core_btreemap.fns.insert("len".to_string());
+    core_btreemap.fns.insert("is-empty".to_string());
+    core_btreemap.fns.insert("get".to_string());
+    core_btreemap.fns.insert("contains".to_string());
+    core_btreemap.fns.insert("insert".to_string());
+    core_btreemap.fns.insert("remove".to_string());
+    out.insert("core.btreemap".to_string(), core_btreemap);
 
     out
 }
