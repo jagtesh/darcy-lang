@@ -44,7 +44,8 @@ simple moving-average strategy. To run it:
 cargo run -p dslc --bin bench -- --iters 200000
 ```
 
-To compare against CEL, enable the `cel` feature and wire a CEL evaluator in the stub.
+To compare against CEL, enable the `cel` feature. The harness uses the `cel` crate to evaluate a
+simple expression with a custom `last_sma` function.
 
 Try the error cases:
 

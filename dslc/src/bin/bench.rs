@@ -77,6 +77,40 @@ fn simple_sma(values: &[f64], period: usize) -> Vec<f64> {
 
 #[cfg(feature = "cel")]
 fn cel_equiv(values: &[f64], threshold: f64) -> f64 {
-    // TODO: wire a CEL evaluator. This is a stub so the harness compiles.
-    dsl_equiv(values, threshold)
+    use cel::{Context, Program, Value};
+    use std::sync::OnceLock;
+
+    static PROGRAM: OnceLock<Program> = OnceLock::new();
+    static CONTEXT: OnceLock<Context<'static>> = OnceLock::new();
+
+    let program = PROGRAM.get_or_init(|| {
+        let src = "last_sma(values, 10) > threshold ? last_sma(values, 10) : 0.0";
+        Program::compile(src).expect("cel parse")
+    });
+
+    let ctx = CONTEXT.get_or_init(|| {
+        let mut ctx = Context::default();
+        ctx.add_variable("values", values.to_vec()).expect("cel values");
+        ctx.add_variable("threshold", threshold).expect("cel threshold");
+        ctx.add_function("last_sma", |vals: std::sync::Arc<Vec<Value>>, period: i64| -> f64 {
+            let mut out = Vec::with_capacity(vals.len());
+            for v in vals.iter() {
+                match v {
+                    Value::Float(f) => out.push(*f),
+                    Value::Int(i) => out.push(*i as f64),
+                    _ => return 0.0,
+                }
+            }
+            let sma = simple_sma(&out, period as usize);
+            *sma.last().unwrap_or(&0.0)
+        });
+        ctx
+    });
+
+    let value = program.execute(ctx).expect("cel exec");
+    match value {
+        Value::Float(v) => v,
+        Value::Int(v) => v as f64,
+        _ => 0.0,
+    }
 }
