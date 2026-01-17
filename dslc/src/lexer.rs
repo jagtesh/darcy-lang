@@ -7,6 +7,7 @@ pub enum TokKind {
     LBrack,
     RBrack,
     Sym(String),
+    Str(String),
     Int(i64),
     Float(f64),
 }
@@ -47,6 +48,35 @@ pub fn lex(input: &str) -> DslResult<Vec<Tok>> {
             }
             continue;
         }
+        if c == '#' && i + 1 < bytes.len() && input[i + 1..].chars().next() == Some('|') {
+            i += 2;
+            col += 2;
+            let mut closed = false;
+            while i < bytes.len() {
+                let ch = input[i..].chars().next().unwrap();
+                if ch == '|' && i + 1 < bytes.len() && input[i + 1..].chars().next() == Some('#') {
+                    i += 2;
+                    col += 2;
+                    closed = true;
+                    break;
+                }
+                if ch == '\n' {
+                    i += 1;
+                    line += 1;
+                    col = 1;
+                } else {
+                    i += ch.len_utf8();
+                    col += 1;
+                }
+            }
+            if !closed {
+                return Err(Diag::new("unterminated block comment").with_span(Span {
+                    start,
+                    end: Loc { line, col, byte: i },
+                }));
+            }
+            continue;
+        }
         if c.is_whitespace() {
             if c == '\n' {
                 i += 1;
@@ -79,6 +109,41 @@ pub fn lex(input: &str) -> DslResult<Vec<Tok>> {
                 i += 1;
                 col += 1;
                 TokKind::RBrack
+            }
+            '"' => {
+                i += 1;
+                col += 1;
+                let mut s = String::new();
+                let mut closed = false;
+                while i < bytes.len() {
+                    let ch = input[i..].chars().next().unwrap();
+                    if ch == '"' {
+                        i += 1;
+                        col += 1;
+                        closed = true;
+                        break;
+                    }
+                    if ch == '\n' {
+                        return Err(
+                            Diag::new("unterminated string literal").with_span(Span {
+                                start,
+                                end: Loc { line, col, byte: i },
+                            }),
+                        );
+                    }
+                    s.push(ch);
+                    i += ch.len_utf8();
+                    col += 1;
+                }
+                if !closed {
+                    return Err(
+                        Diag::new("unterminated string literal").with_span(Span {
+                            start,
+                            end: Loc { line, col, byte: i },
+                        }),
+                    );
+                }
+                TokKind::Str(s)
             }
             _ => {
                 if c.is_ascii_digit()

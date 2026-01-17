@@ -13,39 +13,58 @@ pub fn lower_program(pipeline: &PipelineOutput) -> DslResult<String> {
     let mut structs = BTreeMap::new();
     let mut unions = BTreeMap::new();
     let mut variants: BTreeMap<String, (String, VariantDef)> = BTreeMap::new();
+    let mut type_names = BTreeMap::new();
+    let mut fn_names = BTreeMap::new();
     for t in &pipeline.tops {
         if let Top::Struct(sd) = t {
             structs.insert(sd.name.clone(), sd.clone());
-            out.push_str(&format!("#[derive(Debug, Clone)]\n"));
-            out.push_str(&format!("pub struct {} {{\n", sd.name));
-            for f in &sd.fields {
-                out.push_str(&format!("    pub {}: {},\n", f.name, f.ty.rust()));
+            type_names.insert(sd.name.clone(), sd.rust_name.clone());
+            if !sd.extern_ {
+                out.push_str(&format!("#[derive(Debug, Clone)]\n"));
+                out.push_str(&format!("pub struct {} {{\n", sd.rust_name));
+                for f in &sd.fields {
+                    out.push_str(&format!(
+                        "    pub {}: {},\n",
+                        f.rust_name,
+                        ty_rust(&f.ty, &type_names)
+                    ));
+                }
+                out.push_str("}\n\n");
             }
-            out.push_str("}\n\n");
         }
         if let Top::Union(ud) = t {
             unions.insert(ud.name.clone(), ud.clone());
+            type_names.insert(ud.name.clone(), ud.rust_name.clone());
             for v in &ud.variants {
                 variants.insert(v.name.clone(), (ud.name.clone(), v.clone()));
             }
         }
+        if let Top::Func(fd) = t {
+            fn_names.insert(fd.name.clone(), fd.rust_name.clone());
+        }
     }
 
     for ud in unions.values() {
-        out.push_str(&format!("#[derive(Debug, Clone)]\n"));
-        out.push_str(&format!("pub enum {} {{\n", ud.name));
-        for v in &ud.variants {
-            if v.fields.is_empty() {
-                out.push_str(&format!("    {},\n", v.name));
-            } else {
-                out.push_str(&format!("    {} {{\n", v.name));
-                for f in &v.fields {
-                    out.push_str(&format!("        {}: {},\n", f.name, f.ty.rust()));
+        if !ud.extern_ {
+            out.push_str(&format!("#[derive(Debug, Clone)]\n"));
+            out.push_str(&format!("pub enum {} {{\n", ud.rust_name));
+            for v in &ud.variants {
+                if v.fields.is_empty() {
+                    out.push_str(&format!("    {},\n", v.rust_name));
+                } else {
+                    out.push_str(&format!("    {} {{\n", v.rust_name));
+                    for f in &v.fields {
+                        out.push_str(&format!(
+                            "        {}: {},\n",
+                            f.rust_name,
+                            ty_rust(&f.ty, &type_names)
+                        ));
+                    }
+                    out.push_str("    },\n");
                 }
-                out.push_str("    },\n");
             }
+            out.push_str("}\n\n");
         }
-        out.push_str("}\n\n");
     }
 
     let mut typed_iter = pipeline.typechecked.typed_fns.iter();
@@ -58,13 +77,16 @@ pub fn lower_program(pipeline: &PipelineOutput) -> DslResult<String> {
                 return Err(Diag::new("internal error: typed function order mismatch")
                     .with_span(fd.span.clone()));
             }
+            if fd.extern_ {
+                continue;
+            }
             let is_main = fd.name == "main" && fd.params.is_empty();
-            out.push_str(&format!("pub fn {}(", fd.name));
-            emit_params(&mut out, fd, typed)?;
+            out.push_str(&format!("pub fn {}(", fd.rust_name));
+            emit_params(&mut out, fd, typed, &type_names)?;
             if is_main {
                 out.push_str(") {\n");
             } else {
-                out.push_str(&format!(") -> {} {{\n", typed.body.ty.rust()));
+                out.push_str(&format!(") -> {} {{\n", ty_rust(&typed.body.ty, &type_names)));
             }
             out.push_str("    ");
             out.push_str(&lower_expr(
@@ -73,6 +95,8 @@ pub fn lower_program(pipeline: &PipelineOutput) -> DslResult<String> {
                 &typed.body.types,
                 &structs,
                 &variants,
+                &fn_names,
+                &type_names,
             ));
             if is_main {
                 out.push_str(";\n}\n\n");
@@ -85,17 +109,22 @@ pub fn lower_program(pipeline: &PipelineOutput) -> DslResult<String> {
     Ok(out)
 }
 
-fn emit_params(out: &mut String, fd: &crate::ast::FnDef, typed: &TypedFn) -> DslResult<()> {
+fn emit_params(
+    out: &mut String,
+    fd: &crate::ast::FnDef,
+    typed: &TypedFn,
+    type_names: &BTreeMap<String, String>,
+) -> DslResult<()> {
     let mut first = true;
     for p in &fd.params {
         if !first {
             out.push_str(", ");
         }
         first = false;
-        let ty = typed.param_tys.get(&p.name).ok_or_else(|| {
+        let ty = typed.param_tys.get(&p.rust_name).ok_or_else(|| {
             Diag::new("internal error: missing param type").with_span(p.span.clone())
         })?;
-        out.push_str(&format!("{}: {}", p.name, ty.rust()));
+        out.push_str(&format!("{}: {}", p.rust_name, ty_rust(ty, type_names)));
     }
     Ok(())
 }
@@ -106,6 +135,8 @@ fn lower_expr(
     types: &BTreeMap<SpanKey, Ty>,
     structs: &BTreeMap<String, StructDef>,
     variants: &BTreeMap<String, (String, VariantDef)>,
+    fn_names: &BTreeMap<String, String>,
+    type_names: &BTreeMap<String, String>,
 ) -> String {
     let mut inner = match e {
         Expr::Int(v, _) => v.to_string(),
@@ -120,14 +151,14 @@ fn lower_expr(
         Expr::VecLit { elems, ann, .. } => {
             if elems.is_empty() {
                 if let Some(Ty::Vec(inner)) = ann {
-                    format!("Vec::<{}>::new()", inner.rust())
+                    format!("Vec::<{}>::new()", ty_rust(inner, type_names))
                 } else {
                     "vec![]".to_string()
                 }
             } else {
                 let rendered: Vec<String> = elems
                     .iter()
-                    .map(|el| lower_expr(el, casts, types, structs, variants))
+                    .map(|el| lower_expr(el, casts, types, structs, variants, fn_names, type_names))
                     .collect();
                 format!("vec![{}]", rendered.join(", "))
             }
@@ -135,17 +166,23 @@ fn lower_expr(
         Expr::Field { base, field, span: _ } => {
             let base_ty = expr_ty(types, &base.span());
             if let Some(Ty::Vec(_)) = base_ty {
-                let base_expr = lower_expr(base, casts, types, structs, variants);
+                let base_expr =
+                    lower_expr(base, casts, types, structs, variants, fn_names, type_names);
                 format!(
                     "({}).into_iter().map(|__x| __x.{}).collect::<Vec<_>>()",
                     base_expr, field
                 )
             } else {
-                format!("{}.{}", lower_expr(base, casts, types, structs, variants), field)
+                format!(
+                    "{}.{}",
+                    lower_expr(base, casts, types, structs, variants, fn_names, type_names),
+                    field
+                )
             }
         }
         Expr::Match { scrutinee, arms, .. } => {
-            let scrut = lower_expr(scrutinee, casts, types, structs, variants);
+            let scrut =
+                lower_expr(scrutinee, casts, types, structs, variants, fn_names, type_names);
             let mut rendered = String::new();
             rendered.push_str(&format!("match {} {{ ", scrut));
             for arm in arms {
@@ -155,8 +192,15 @@ fn lower_expr(
                     }
                     MatchPat::Variant { name, bindings, .. } => {
                         if let Some((union_name, vdef)) = variants.get(name) {
+                            let union_rust = type_names
+                                .get(union_name)
+                                .cloned()
+                                .unwrap_or_else(|| rust_type_name(union_name));
                             if vdef.fields.is_empty() {
-                                rendered.push_str(&format!("{}::{} => ", union_name, name));
+                                rendered.push_str(&format!(
+                                    "{}::{} => ",
+                                    union_rust, vdef.rust_name
+                                ));
                             } else {
                                 let mut parts = Vec::new();
                                 for (field, binding, _) in bindings {
@@ -168,8 +212,8 @@ fn lower_expr(
                                 }
                                 rendered.push_str(&format!(
                                     "{}::{} {{ {} }} => ",
-                                    union_name,
-                                    name,
+                                    union_rust,
+                                    vdef.rust_name,
                                     parts.join(", ")
                                 ));
                             }
@@ -178,7 +222,8 @@ fn lower_expr(
                         }
                     }
                 }
-                let body = lower_expr(&arm.body, casts, types, structs, variants);
+                let body =
+                    lower_expr(&arm.body, casts, types, structs, variants, fn_names, type_names);
                 rendered.push_str(&format!("{}, ", body));
             }
             rendered.push_str("}");
@@ -188,33 +233,37 @@ fn lower_expr(
             if op == "print" && args.len() == 1 {
                 return format!(
                     "println!(\"{{:?}}\", {})",
-                    lower_expr(&args[0], casts, types, structs, variants)
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
                 );
             }
             if let Some(sd) = structs.get(op) {
                 let rendered: Vec<String> = args
                     .iter()
-                    .map(|el| lower_expr(el, casts, types, structs, variants))
+                    .map(|el| lower_expr(el, casts, types, structs, variants, fn_names, type_names))
                     .collect();
                 let mut parts = Vec::new();
                 for (field, expr) in sd.fields.iter().zip(rendered.iter()) {
-                    parts.push(format!("{}: {}", field.name, expr));
+                    parts.push(format!("{}: {}", field.rust_name, expr));
                 }
-                return format!("{} {{ {} }}", op, parts.join(", "));
+                return format!("{} {{ {} }}", sd.rust_name, parts.join(", "));
             }
             if let Some((union_name, vdef)) = variants.get(op) {
+                let union_rust = type_names
+                    .get(union_name)
+                    .cloned()
+                    .unwrap_or_else(|| rust_type_name(union_name));
                 let rendered: Vec<String> = args
                     .iter()
-                    .map(|el| lower_expr(el, casts, types, structs, variants))
+                    .map(|el| lower_expr(el, casts, types, structs, variants, fn_names, type_names))
                     .collect();
                 let mut parts = Vec::new();
                 for (field, expr) in vdef.fields.iter().zip(rendered.iter()) {
-                    parts.push(format!("{}: {}", field.name, expr));
+                    parts.push(format!("{}: {}", field.rust_name, expr));
                 }
                 return if vdef.fields.is_empty() {
-                    format!("{}::{}", union_name, op)
+                    format!("{}::{}", union_rust, vdef.rust_name)
                 } else {
-                    format!("{}::{} {{ {} }}", union_name, op, parts.join(", "))
+                    format!("{}::{} {{ {} }}", union_rust, vdef.rust_name, parts.join(", "))
                 };
             }
             if args.len() == 2 && ["+", "-", "*", "/"].contains(&op.as_str()) {
@@ -229,6 +278,8 @@ fn lower_expr(
                         types,
                         structs,
                         variants,
+                        fn_names,
+                        type_names,
                         true,
                         &right_ty,
                     );
@@ -242,22 +293,25 @@ fn lower_expr(
                         types,
                         structs,
                         variants,
+                        fn_names,
+                        type_names,
                         false,
                         &left_ty,
                     );
                 }
                 format!(
                     "({} {} {})",
-                    lower_expr(&args[0], casts, types, structs, variants),
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names),
                     op,
-                    lower_expr(&args[1], casts, types, structs, variants)
+                    lower_expr(&args[1], casts, types, structs, variants, fn_names, type_names)
                 )
             } else {
                 let rendered: Vec<String> = args
                     .iter()
-                    .map(|el| lower_expr(el, casts, types, structs, variants))
+                    .map(|el| lower_expr(el, casts, types, structs, variants, fn_names, type_names))
                     .collect();
-                format!("{}({})", op, rendered.join(", "))
+                let name = fn_names.get(op).cloned().unwrap_or_else(|| rust_value_name(op));
+                format!("{}({})", name, rendered.join(", "))
             }
         }
     };
@@ -287,13 +341,16 @@ fn vec_scalar_binop(
     types: &BTreeMap<SpanKey, Ty>,
     structs: &BTreeMap<String, StructDef>,
     variants: &BTreeMap<String, (String, VariantDef)>,
+    fn_names: &BTreeMap<String, String>,
+    type_names: &BTreeMap<String, String>,
     vec_on_left: bool,
     scalar_ty: &Ty,
 ) -> String {
     let vec_expr = if vec_on_left { left } else { right };
     let scalar_expr = if vec_on_left { right } else { left };
-    let vec_render = lower_expr(vec_expr, casts, types, structs, variants);
-    let scalar_render = lower_expr(scalar_expr, casts, types, structs, variants);
+    let vec_render = lower_expr(vec_expr, casts, types, structs, variants, fn_names, type_names);
+    let scalar_render =
+        lower_expr(scalar_expr, casts, types, structs, variants, fn_names, type_names);
     let scalar = match scalar_ty {
         Ty::Named(_) => scalar_render,
         _ => scalar_render,
@@ -302,4 +359,43 @@ fn vec_scalar_binop(
         "({}).into_iter().map(|__x| __x {} {}).collect::<Vec<_>>()",
         vec_render, op, scalar
     )
+}
+
+fn rust_type_name(name: &str) -> String {
+    let mut out = String::new();
+    for part in name.split(|c| c == '-' || c == '_') {
+        if part.is_empty() {
+            continue;
+        }
+        let mut chars = part.chars();
+        if let Some(c) = chars.next() {
+            out.push(c.to_ascii_uppercase());
+            out.push_str(chars.as_str());
+        }
+    }
+    out
+}
+
+fn ty_rust(ty: &Ty, type_names: &BTreeMap<String, String>) -> String {
+    match ty {
+        Ty::Named(s) => {
+            if matches!(
+                s.as_str(),
+                "i32" | "i64" | "u32" | "u64" | "f32" | "f64" | "bool" | "usize" | "isize" | "()"
+            ) {
+                s.clone()
+            } else {
+                type_names
+                    .get(s)
+                    .cloned()
+                    .unwrap_or_else(|| rust_type_name(s))
+            }
+        }
+        Ty::Vec(inner) => format!("Vec<{}>", ty_rust(inner, type_names)),
+        Ty::Unknown => "_".to_string(),
+    }
+}
+
+fn rust_value_name(name: &str) -> String {
+    name.replace('-', "_")
 }

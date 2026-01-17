@@ -1,13 +1,13 @@
-(defunion Shape
-  (Circle (radius f64))
-  (Rect (w f64) (h f64))
-  (Point))
+(defunion shape
+  (circle (radius f64))
+  (rect (w f64) (h f64))
+  (point))
 
-(defn area [s:Shape]
+(defn area [s:shape]
   (match s
-    (Circle (radius r) (* r r))
-    (Rect (w w) (h h) (* w h))
-    (Point 0.0)))
+    (circle (radius r) (* r r))
+    (rect (w w) (h h) (* w h))
+    (point 0.0)))
 
 (defn main []
-  (print (area (Circle 3.0))))
+  (print (area (circle 3.0))))

@@ -3,14 +3,19 @@
 This is a tiny proof-of-concept "Elm-ish typed Lisp" frontend that lowers to Rust.
 
 What it supports (MVP):
-- `(defstruct Name (field Type) ...)`
-- `(defn name [params] expr)`
-  - params are symbols like `o:Order` (type annotation required unless inference is unambiguous)
+ - `(defstruct name (field type) ...)`
+ - `(defn name [params] expr)`
+   - params are symbols like `o:order` (type annotation required unless inference is unambiguous)
 - Expressions:
   - numeric literals (ints default to i32, floats to f64)
   - variables
   - field access sugar: `o.qty`
   - binary ops: `+ - * /` in prefix form: `(* a b)`
+  - unions + match: `(defunion name (variant (field Type) ...) ...)`, `(match x (variant (field v) expr) (_ expr))`
+  - vectors: `[1 2 3]`, `(vec<i32> 1 2 3)`
+  - print: `(print expr)`
+  - extern wrapper: `(extern (defstruct ...))`, `(extern (defunion ...))`, `(extern (defn name [params] RetType))`
+  - comments: `; line` and `#| block |#`
 
 What it does NOT support yet:
 - borrowing/ownership surface syntax
@@ -41,3 +46,7 @@ cargo run -p dslc -- examples/missing_field.dsl
 
 The intent is: your compiler does the "clarity layer" (shape + local type inference + good errors),
 and Rust remains the final checker for deep lifetime / trait issues.
+
+Naming: DSL identifiers are lowercase kebab-case. They are normalized to Rust identifiers during lowering
+(types and variants become PascalCase; values become snake_case). Use `(extern "RustName" (def...))`
+to override the Rust name for extern declarations.

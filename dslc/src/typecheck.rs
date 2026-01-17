@@ -119,7 +119,7 @@ pub fn typecheck_tops(tops: &[Top]) -> DslResult<TypecheckedProgram> {
                 params: fd
                     .params
                     .iter()
-                    .map(|p| typed.param_tys[&p.name].clone())
+                    .map(|p| typed.param_tys[&p.rust_name].clone())
                     .collect(),
                 ret: typed.body.ty.clone(),
             };
@@ -138,7 +138,20 @@ pub fn typecheck_fn(env: &TypeEnv, fns: &FnEnv, f: &FnDef) -> DslResult<TypedFn>
         vars.insert(k.clone(), v.clone());
     }
 
-    let body = infer_expr_type(env, fns, &vars, &f.body)?;
+    let body = if f.extern_ {
+        let ret = f
+            .extern_ret
+            .clone()
+            .ok_or_else(|| Diag::new("extern function must declare return type").with_span(f.span.clone()))?;
+        TypedExpr {
+            expr: f.body.clone(),
+            ty: ret,
+            casts: vec![],
+            types: BTreeMap::new(),
+        }
+    } else {
+        infer_expr_type(env, fns, &vars, &f.body)?
+    };
     Ok(TypedFn {
         def: f.clone(),
         param_tys,
@@ -168,13 +181,13 @@ fn infer_param_types(env: &TypeEnv, f: &FnDef) -> DslResult<BTreeMap<String, Ty>
     let mut param_spans: BTreeMap<String, Span> = BTreeMap::new();
 
     for p in &f.params {
-        if param_tys.contains_key(&p.name) {
+        if param_tys.contains_key(&p.rust_name) {
             return Err(
                 Diag::new(format!("duplicate parameter '{}'", p.name)).with_span(p.span.clone()),
             );
         }
-        param_tys.insert(p.name.clone(), p.ann.clone().unwrap_or(Ty::Unknown));
-        param_spans.insert(p.name.clone(), p.span.clone());
+        param_tys.insert(p.rust_name.clone(), p.ann.clone().unwrap_or(Ty::Unknown));
+        param_spans.insert(p.rust_name.clone(), p.span.clone());
     }
 
     let mut constraints: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -193,21 +206,21 @@ fn infer_param_types(env: &TypeEnv, f: &FnDef) -> DslResult<BTreeMap<String, Ty>
         let cur = param_tys.get(&p).cloned().unwrap_or(Ty::Unknown);
         match &cur {
             Ty::Named(ty_name) => {
-                let sd = env.structs.get(ty_name).ok_or_else(|| {
-                    Diag::new(format!("unknown type '{}'", ty_name))
-                        .with_span(param_spans[&p].clone())
-                })?;
-                for fld in &fields {
-                    if !sd.fields.iter().any(|ff| ff.name == *fld) {
-                        return Err(Diag::new(format!(
-                            "type '{}' has no field '{}'",
-                            ty_name, fld
-                        ))
-                        .with_span(param_spans[&p].clone()));
-                    }
+            let sd = env.structs.get(ty_name).ok_or_else(|| {
+                Diag::new(format!("unknown type '{}'", ty_name))
+                    .with_span(param_spans[&p].clone())
+            })?;
+            for fld in &fields {
+                if !sd.fields.iter().any(|ff| ff.rust_name == *fld) {
+                    return Err(Diag::new(format!(
+                        "type '{}' has no field '{}'",
+                        ty_name, fld
+                    ))
+                    .with_span(param_spans[&p].clone()));
                 }
-                continue;
             }
+            continue;
+        }
             Ty::Vec(inner) => {
                 let ty_name = match inner.as_ref() {
                     Ty::Named(n) => n.clone(),
@@ -228,7 +241,7 @@ fn infer_param_types(env: &TypeEnv, f: &FnDef) -> DslResult<BTreeMap<String, Ty>
                         .with_span(param_spans[&p].clone())
                 })?;
                 for fld in &fields {
-                    if !sd.fields.iter().any(|ff| ff.name == *fld) {
+                    if !sd.fields.iter().any(|ff| ff.rust_name == *fld) {
                         return Err(Diag::new(format!(
                             "type '{}' has no field '{}'",
                             ty_name, fld
@@ -245,7 +258,7 @@ fn infer_param_types(env: &TypeEnv, f: &FnDef) -> DslResult<BTreeMap<String, Ty>
         for (name, sd) in &env.structs {
             let ok = fields
                 .iter()
-                .all(|fld| sd.fields.iter().any(|ff| &ff.name == fld));
+                .all(|fld| sd.fields.iter().any(|ff| &ff.rust_name == fld));
             if ok {
                 candidates.push(name.clone());
             }
@@ -426,7 +439,7 @@ fn infer_expr_type(
             let f = sd
                 .fields
                 .iter()
-                .find(|ff| ff.name == *field)
+                .find(|ff| ff.rust_name == *field)
                 .ok_or_else(|| {
                     Diag::new(format!("type '{}' has no field '{}'", struct_name, field))
                         .with_span(span.clone())
@@ -521,7 +534,7 @@ fn infer_expr_type(
                             let fdef = vdef
                                 .fields
                                 .iter()
-                                .find(|f| f.name == *field_name)
+                                .find(|f| f.rust_name == *field_name)
                                 .ok_or_else(|| {
                                     Diag::new(format!(
                                         "variant '{}' has no field '{}'",

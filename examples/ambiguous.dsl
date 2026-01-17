@@ -1,8 +1,8 @@
-(defstruct Order
+(defstruct order
   (qty u32)
   (price f64))
 
-(defstruct Invoice
+(defstruct invoice
   (qty u32)
   (price f64))
 
