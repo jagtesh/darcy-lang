@@ -252,6 +252,40 @@ fn lower_expr(
                     lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
                 );
             }
+            if op == "core.str/len" && args.len() == 1 {
+                return format!(
+                    "({}).len()",
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if op == "core.str/is-empty" && args.len() == 1 {
+                return format!(
+                    "({}).is_empty()",
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if op == "core.str/trim" && args.len() == 1 {
+                return format!(
+                    "({}).trim().to_string()",
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if op == "core.str/split" && args.len() == 2 {
+                let s = lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names);
+                let sep =
+                    lower_expr(&args[1], casts, types, structs, variants, fn_names, type_names);
+                return format!(
+                    "({}).split(({}).as_str()).map(String::from).collect::<Vec<_>>()",
+                    s, sep
+                );
+            }
+            if op == "core.str/join" && args.len() == 2 {
+                let items =
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names);
+                let sep =
+                    lower_expr(&args[1], casts, types, structs, variants, fn_names, type_names);
+                return format!("({}).join(({}).as_str())", items, sep);
+            }
             if op == "core.num/abs" && args.len() == 1 {
                 return format!(
                     "({}).abs()",

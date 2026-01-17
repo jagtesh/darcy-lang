@@ -361,6 +361,18 @@ fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
     core_vec.fns.insert("is-empty".to_string());
     out.insert("core.vec".to_string(), core_vec);
 
+    let mut core_str = ModuleDefs {
+        types: BTreeSet::new(),
+        variants: BTreeSet::new(),
+        fns: BTreeSet::new(),
+    };
+    core_str.fns.insert("len".to_string());
+    core_str.fns.insert("is-empty".to_string());
+    core_str.fns.insert("trim".to_string());
+    core_str.fns.insert("split".to_string());
+    core_str.fns.insert("join".to_string());
+    out.insert("core.str".to_string(), core_str);
+
     out
 }
 

@@ -153,6 +153,7 @@ Modules are files addressed by path strings and brought into scope with `use` or
 - `std/io`: `print`
 - `core/num`: `abs`, `min`, `max`, `clamp`
 - `core/vec`: `len`, `is-empty`
+- `core/str`: `len`, `is-empty`, `trim`, `split`, `join`
 
 ### Resolution Rules
 

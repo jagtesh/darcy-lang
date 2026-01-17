@@ -792,6 +792,79 @@ fn infer_expr_type(
                         types,
                     })
                 }
+                "core.str/len" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("'len' expects 1 argument").with_span(span.clone()));
+                    }
+                    ensure_string_arg(ctx, &targs[0].ty, &args[0].span())?;
+                    let out_ty = InferTy::Named("usize".to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.str/is-empty" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("'is-empty' expects 1 argument").with_span(span.clone()));
+                    }
+                    ensure_string_arg(ctx, &targs[0].ty, &args[0].span())?;
+                    let out_ty = InferTy::Named("bool".to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.str/trim" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("'trim' expects 1 argument").with_span(span.clone()));
+                    }
+                    ensure_string_arg(ctx, &targs[0].ty, &args[0].span())?;
+                    let out_ty = InferTy::Named("string".to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.str/split" => {
+                    if targs.len() != 2 {
+                        return Err(Diag::new("'split' expects 2 arguments").with_span(span.clone()));
+                    }
+                    ensure_string_arg(ctx, &targs[0].ty, &args[0].span())?;
+                    ensure_string_arg(ctx, &targs[1].ty, &args[1].span())?;
+                    let out_ty = InferTy::Vec(Box::new(InferTy::Named("string".to_string())));
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.str/join" => {
+                    if targs.len() != 2 {
+                        return Err(Diag::new("'join' expects 2 arguments").with_span(span.clone()));
+                    }
+                    let elem = ensure_vec_arg(ctx, &targs[0].ty, &args[0].span())?;
+                    ensure_string_arg(ctx, &elem, &args[0].span())?;
+                    ensure_string_arg(ctx, &targs[1].ty, &args[1].span())?;
+                    let out_ty = InferTy::Named("string".to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
                 _ if env.structs.contains_key(op) => {
                     let sd = env.structs.get(op).unwrap();
                     if targs.len() != sd.fields.len() {
@@ -917,6 +990,21 @@ fn ensure_vec_arg(ctx: &mut InferCtx, ty: &InferTy, span: &Span) -> DslResult<In
         InferTy::Named(name) => Err(
             Diag::new(format!("expected vector type, got '{}'", name)).with_span(span.clone()),
         ),
+    }
+}
+
+fn ensure_string_arg(ctx: &mut InferCtx, ty: &InferTy, span: &Span) -> DslResult<()> {
+    let resolved = ctx.resolve(ty);
+    match resolved {
+        InferTy::Named(name) if name == "string" => Ok(()),
+        InferTy::Var(_) => {
+            ctx.unify(&resolved, &InferTy::Named("string".to_string()), span)?;
+            Ok(())
+        }
+        InferTy::Named(name) => Err(
+            Diag::new(format!("expected string type, got '{}'", name)).with_span(span.clone()),
+        ),
+        InferTy::Vec(_) => Err(Diag::new("expected string type, got vector").with_span(span.clone())),
     }
 }
 
