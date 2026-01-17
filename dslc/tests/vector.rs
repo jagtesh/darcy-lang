@@ -4,7 +4,7 @@ use dslc::compile;
 fn broadcasts_vector_scalar() {
     let src = "(defn scale [] (* [1 2 3] 2))";
     let out = compile(src).expect("compile ok");
-    assert!(out.contains("map(|__x| __x * 2)"));
+    assert!(out.contains("map(|__x| __x * 2i32)"), "{}", out);
 }
 
 #[test]

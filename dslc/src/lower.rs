@@ -139,7 +139,7 @@ fn lower_expr(
     type_names: &BTreeMap<String, String>,
 ) -> String {
     let mut inner = match e {
-        Expr::Int(v, _) => v.to_string(),
+        Expr::Int(v, sp) => render_int_literal(*v, sp, types),
         Expr::Float(v, _) => {
             let mut s = v.to_string();
             if !s.contains('.') && !s.contains('e') && !s.contains('E') {
@@ -254,7 +254,7 @@ fn lower_expr(
             rendered.push_str("}");
             rendered
         }
-        Expr::Call { op, args, span: _ } => {
+        Expr::Call { op, args, span } => {
             if (op == "print" || op == "std.io/print") && args.len() == 1 {
                 return format!(
                     "println!(\"{{:?}}\", {})",
@@ -314,7 +314,34 @@ fn lower_expr(
                 );
             }
             if op == "core.option/none" && args.is_empty() {
-                return "None".to_string();
+                if let Some(Ty::Option(inner)) = expr_ty(types, span) {
+                    let inner = *inner;
+                    if matches!(inner, Ty::Unknown) {
+                        return "Option::<()>::None".to_string();
+                    }
+                    return format!("Option::<{}>::None", ty_rust(&inner, type_names));
+                }
+                return "Option::<()>::None".to_string();
+            }
+            if op == "core.result/ok" && args.len() == 1 {
+                let val =
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names);
+                if let Some(Ty::Result(ok_ty, err_ty)) = expr_ty(types, span) {
+                    let ok = ty_rust_default(&ok_ty, type_names, "_");
+                    let err = ty_rust_default(&err_ty, type_names, "()");
+                    return format!("Result::<{}, {}>::Ok({})", ok, err, val);
+                }
+                return format!("Result::<_, ()>::Ok({})", val);
+            }
+            if op == "core.result/err" && args.len() == 1 {
+                let val =
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names);
+                if let Some(Ty::Result(ok_ty, err_ty)) = expr_ty(types, span) {
+                    let ok = ty_rust_default(&ok_ty, type_names, "()");
+                    let err = ty_rust_default(&err_ty, type_names, "_");
+                    return format!("Result::<{}, {}>::Err({})", ok, err, val);
+                }
+                return format!("Result::<(), _>::Err({})", val);
             }
             if op == "core.option/is-some" && args.len() == 1 {
                 return format!(
@@ -553,6 +580,23 @@ fn expr_ty(types: &BTreeMap<SpanKey, Ty>, span: &Span) -> Option<Ty> {
     types.get(&SpanKey::new(span)).cloned()
 }
 
+fn render_int_literal(v: i64, sp: &Span, types: &BTreeMap<SpanKey, Ty>) -> String {
+    let suffix = match expr_ty(types, sp) {
+        Some(Ty::Named(name)) if is_int_type(&name) => name,
+        Some(Ty::Named(name)) if is_uint_type(&name) => name,
+        _ => "i32".to_string(),
+    };
+    format!("{}{}", v, suffix)
+}
+
+fn is_int_type(name: &str) -> bool {
+    matches!(name, "i8" | "i16" | "i32" | "i64" | "isize")
+}
+
+fn is_uint_type(name: &str) -> bool {
+    matches!(name, "u8" | "u16" | "u32" | "u64" | "usize")
+}
+
 fn vec_scalar_binop(
     op: &str,
     left: &Expr,
@@ -645,6 +689,14 @@ fn ty_rust(ty: &Ty, type_names: &BTreeMap<String, String>) -> String {
             )
         }
         Ty::Unknown => "_".to_string(),
+    }
+}
+
+fn ty_rust_default(ty: &Ty, type_names: &BTreeMap<String, String>, default: &str) -> String {
+    if matches!(ty, Ty::Unknown) {
+        default.to_string()
+    } else {
+        ty_rust(ty, type_names)
     }
 }
 

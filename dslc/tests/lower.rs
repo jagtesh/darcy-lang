@@ -7,3 +7,10 @@ fn lowers_numeric_binop() {
     assert!(out.contains("pub fn total"));
     assert!(out.contains("* o.price"));
 }
+
+#[test]
+fn lowers_abs_with_typed_negative_literal() {
+    let src = "(defn main [] (core.num/abs -42))";
+    let out = compile(src).expect("compile ok");
+    assert!(out.contains("(-42i32).abs()"), "{}", out);
+}

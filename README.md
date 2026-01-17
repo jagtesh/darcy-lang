@@ -35,6 +35,12 @@ cargo run -p dslc -- examples/ok.dsl > out.rs
 cat out.rs
 ```
 
+Add a stdlib search path:
+
+```bash
+cargo run -p dslc -- --lib stdlib examples/ok.dsl
+```
+
 ## Modules quickstart
 
 ```lisp

@@ -143,6 +143,12 @@ Modules are files addressed by path strings and brought into scope with `use` or
 (use "std/io")
 ```
 
+Module search paths are:
+
+- Any `--lib`/`-L` paths passed on the CLI (in order)
+- The directory of the input file
+- The current working directory
+
 ### Import Forms
 
 ```

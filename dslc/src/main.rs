@@ -9,15 +9,39 @@ fn main() {
     let mut args = env::args().skip(1).collect::<Vec<_>>();
     if args.is_empty() || args[0] == "-h" || args[0] == "--help" {
         eprintln!(
-            "dslc (MVP)\n\nUsage:\n  dslc <input.dsl>\n  dslc run <input.dsl>\n\nOutputs Rust to stdout, or compiles and runs with 'run'.\n"
+            "dslc (MVP)\n\nUsage:\n  dslc [--lib <dir>] <input.dsl>\n  dslc [--lib <dir>] run <input.dsl>\n\nOptions:\n  --lib, -L <dir>   Add a module search path (repeatable)\n\nOutputs Rust to stdout, or compiles and runs with 'run'.\n"
         );
         std::process::exit(2);
     }
-    let run_mode = args[0] == "run";
-    if run_mode {
-        args.remove(0);
+    let mut run_mode = false;
+    let mut lib_paths: Vec<PathBuf> = Vec::new();
+    let mut files: Vec<String> = Vec::new();
+    let mut i = 0usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "run" => {
+                run_mode = true;
+                i += 1;
+            }
+            "--lib" | "-L" => {
+                if i + 1 >= args.len() {
+                    eprintln!("error: --lib requires a path");
+                    std::process::exit(2);
+                }
+                lib_paths.push(PathBuf::from(&args[i + 1]));
+                i += 2;
+            }
+            _ => {
+                files.push(args[i].clone());
+                i += 1;
+            }
+        }
     }
-    let file = args.remove(0);
+    if files.len() != 1 {
+        eprintln!("error: expected a single input file");
+        std::process::exit(2);
+    }
+    let file = files.remove(0);
     let src = match fs::read_to_string(&file) {
         Ok(s) => s,
         Err(e) => {
@@ -28,14 +52,17 @@ fn main() {
 
     let input_path = PathBuf::from(&file);
     let input_dir = input_path.parent().unwrap_or_else(|| std::path::Path::new("."));
-    let mut lib_paths = vec![input_dir.to_path_buf()];
+    let mut search_paths = lib_paths;
+    if !search_paths.contains(&input_dir.to_path_buf()) {
+        search_paths.push(input_dir.to_path_buf());
+    }
     if let Ok(cwd) = env::current_dir() {
-        if !lib_paths.contains(&cwd) {
-            lib_paths.push(cwd);
+        if !search_paths.contains(&cwd) {
+            search_paths.push(cwd);
         }
     }
 
-    match compile_with_modules(&input_path, &src, &lib_paths) {
+    match compile_with_modules(&input_path, &src, &search_paths) {
         Ok(rust) => {
             if run_mode {
                 if let Err(e) = run_rust(&file, &rust) {
