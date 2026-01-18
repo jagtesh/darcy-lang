@@ -80,6 +80,12 @@ pub struct Param {
 }
 
 #[derive(Debug, Clone)]
+pub enum Iterable {
+    Range(RangeExpr),
+    Expr(Box<Expr>),
+}
+
+#[derive(Debug, Clone)]
 pub enum Expr {
     Int(i64, Span),
     Float(f64, Span),
@@ -131,7 +137,7 @@ pub enum Expr {
     },
     For {
         var: String,
-        range: RangeExpr,
+        iter: Iterable,
         body: Box<Expr>,
         span: Span,
     },
@@ -802,7 +808,7 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
             if op == "for" {
                 if items.len() != 4 {
                     return Err(
-                        Diag::new("for form is (for name (range start end [step]) expr)")
+                        Diag::new("for form is (for name iterable expr)")
                             .with_span(op_span),
                     );
                 }
@@ -810,11 +816,17 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                     Diag::new("for binding must be a symbol").with_span(se_span(&items[1]))
                 })?;
                 let name = ensure_lisp_ident(&name, &sp, "for binding")?;
-                let range = parse_range_expr(&items[2])?;
+
+                let iter = if is_range_form(&items[2]) {
+                    Iterable::Range(parse_range_expr(&items[2])?)
+                } else {
+                    Iterable::Expr(Box::new(parse_expr(&items[2])?))
+                };
+
                 let body = parse_expr(&items[3])?;
                 return Ok(Expr::For {
                     var: rust_value_name(&name),
-                    range,
+                    iter,
                     body: Box::new(body),
                     span: span.clone(),
                 });
@@ -995,6 +1007,17 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
             })
         }
     }
+}
+
+fn is_range_form(se: &Sexp) -> bool {
+    if let Sexp::List(items, _) = se {
+        if !items.is_empty() {
+            if let Some((head, _)) = atom_sym(&items[0]) {
+                return head == "range" || head == "range-incl";
+            }
+        }
+    }
+    false
 }
 
 fn parse_range_expr(se: &Sexp) -> DslResult<RangeExpr> {

@@ -511,9 +511,9 @@ fn expand_inline_calls(
             body: Box::new(expand_inline_calls(body, inline_defs)?),
             span: span.clone(),
         }),
-        Expr::For { var, range, body, span } => Ok(Expr::For {
+        Expr::For { var, iter, body, span } => Ok(Expr::For {
             var: var.clone(),
-            range: inline_subst_range_local(range, inline_defs)?,
+            iter: inline_subst_iterable_local(iter, inline_defs)?,
             body: Box::new(expand_inline_calls(body, inline_defs)?),
             span: span.clone(),
         }),
@@ -643,9 +643,9 @@ fn inline_subst_local(expr: &Expr, map: &BTreeMap<String, Expr>) -> Expr {
             body: Box::new(inline_subst_local(body, map)),
             span: span.clone(),
         },
-        Expr::For { var, range, body, span } => Expr::For {
+        Expr::For { var, iter, body, span } => Expr::For {
             var: var.clone(),
-            range: inline_subst_range(map, range),
+            iter: inline_subst_iterable(iter, map),
             body: Box::new(inline_subst_local(body, map)),
             span: span.clone(),
         },
@@ -1384,29 +1384,52 @@ fn infer_expr_type_internal(
                 types,
             })
         }
-        Expr::For { var, range, body, span } => {
+        Expr::For { var, iter, body, span } => {
             let mut casts = Vec::new();
             let mut types = BTreeMap::new();
-            let tstart = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, &range.start)?;
-            let tend = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, &range.end)?;
-            casts.extend(tstart.casts.clone());
-            casts.extend(tend.casts.clone());
-            types.extend(tstart.types.clone());
-            types.extend(tend.types.clone());
-            ctx.unify(&tstart.ty, &tend.ty, &range.end.span())?;
-            let mut elem_ty = ctx.resolve(&tstart.ty);
-            if let Some(step) = &range.step {
-                let tstep = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, step)?;
-                casts.extend(tstep.casts.clone());
-                types.extend(tstep.types.clone());
-                ctx.unify(&elem_ty, &tstep.ty, &step.span())?;
-                elem_ty = ctx.resolve(&elem_ty);
-            }
-            let elem_resolved = infer_to_ty(ctx, &elem_ty)
-                .ok_or_else(|| Diag::new("cannot infer range element type").with_span(range.span.clone()))?;
-            if !is_numeric(&elem_resolved) {
-                return Err(Diag::new("range bounds must be numeric").with_span(range.span.clone()));
-            }
+
+            let elem_ty = match iter {
+                crate::ast::Iterable::Range(range) => {
+                    let tstart = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, &range.start)?;
+                    let tend = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, &range.end)?;
+                    casts.extend(tstart.casts.clone());
+                    casts.extend(tend.casts.clone());
+                    types.extend(tstart.types.clone());
+                    types.extend(tend.types.clone());
+                    ctx.unify(&tstart.ty, &tend.ty, &range.end.span())?;
+                    let mut elem_ty = ctx.resolve(&tstart.ty);
+                    if let Some(step) = &range.step {
+                        let tstep = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, step)?;
+                        casts.extend(tstep.casts.clone());
+                        types.extend(tstep.types.clone());
+                        ctx.unify(&elem_ty, &tstep.ty, &step.span())?;
+                        elem_ty = ctx.resolve(&elem_ty);
+                    }
+                    let elem_resolved = infer_to_ty(ctx, &elem_ty)
+                        .ok_or_else(|| Diag::new("cannot infer range element type").with_span(range.span.clone()))?;
+                    if !is_numeric(&elem_resolved) {
+                        return Err(Diag::new("range bounds must be numeric").with_span(range.span.clone()));
+                    }
+                    elem_ty
+                }
+                crate::ast::Iterable::Expr(ex) => {
+                    let titer = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, ex)?;
+                    casts.extend(titer.casts.clone());
+                    types.extend(titer.types.clone());
+                    let iter_ty = ctx.resolve(&titer.ty);
+                    match iter_ty {
+                        InferTy::Vec(inner) => *inner,
+                        InferTy::Var(_) => {
+                            let inner = ctx.fresh_var();
+                            ctx.unify(&titer.ty, &InferTy::Vec(Box::new(inner.clone())), &ex.span())?;
+                            inner
+                        }
+                        _ => {
+                            return Err(Diag::new("for loop iterable must be a vector").with_span(ex.span()));
+                        }
+                    }
+                }
+            };
 
             let mut body_vars = vars.clone();
             body_vars.insert(var.clone(), elem_ty.clone());
@@ -2756,4 +2779,24 @@ fn is_numeric(t: &Ty) -> bool {
             || s == "f32"
             || s == "f64"
     )
+}
+
+fn inline_subst_iterable(
+    iter: &crate::ast::Iterable,
+    map: &BTreeMap<String, Expr>,
+) -> crate::ast::Iterable {
+    match iter {
+        crate::ast::Iterable::Range(r) => crate::ast::Iterable::Range(inline_subst_range(map, r)),
+        crate::ast::Iterable::Expr(e) => crate::ast::Iterable::Expr(Box::new(inline_subst_local(e, map))),
+    }
+}
+
+fn inline_subst_iterable_local(
+    iter: &crate::ast::Iterable,
+    inline_defs: &BTreeMap<String, crate::ast::InlineDef>,
+) -> DslResult<crate::ast::Iterable> {
+    match iter {
+        crate::ast::Iterable::Range(r) => Ok(crate::ast::Iterable::Range(inline_subst_range_local(r, inline_defs)?)),
+        crate::ast::Iterable::Expr(e) => Ok(crate::ast::Iterable::Expr(Box::new(expand_inline_calls(e, inline_defs)?))),
+    }
 }

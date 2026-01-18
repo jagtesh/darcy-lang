@@ -267,8 +267,8 @@ fn lower_expr(
             let body = lower_expr(body, casts, types, structs, variants, fn_names, def_names, type_names);
             format!("loop {{ if !({}) {{ break; }} {}; }}", cond, body)
         }
-        Expr::For { var, range, body, .. } => {
-            lower_for_expr(var, range, body, casts, types, structs, variants, fn_names, def_names, type_names)
+        Expr::For { var, iter, body, .. } => {
+            lower_for_expr(var, iter, body, casts, types, structs, variants, fn_names, def_names, type_names)
         }
         Expr::Break { value, .. } => {
             if let Some(v) = value {
@@ -826,7 +826,7 @@ fn vec_scalar_binop(
 
 fn lower_for_expr(
     var: &str,
-    range: &crate::ast::RangeExpr,
+    iter: &crate::ast::Iterable,
     body: &Expr,
     casts: &[crate::typed::CastHint],
     types: &BTreeMap<SpanKey, Ty>,
@@ -836,31 +836,40 @@ fn lower_for_expr(
     def_names: &BTreeMap<String, String>,
     type_names: &BTreeMap<String, String>,
 ) -> String {
-    let start = lower_expr(&range.start, casts, types, structs, variants, fn_names, def_names, type_names);
-    let end = lower_expr(&range.end, casts, types, structs, variants, fn_names, def_names, type_names);
-    let ty = expr_ty(types, &range.start.span());
-    let step = if let Some(step) = &range.step {
-        lower_expr(step, casts, types, structs, variants, fn_names, def_names, type_names)
-    } else {
-        default_step_for_ty(ty.as_ref(), type_names)
-    };
-    let mut_decl = if let Some(ty) = ty.as_ref() {
-        format!("let mut {}: {} = __start - __step;", var, ty_rust(ty, type_names))
-    } else {
-        format!("let mut {} = __start - __step;", var)
-    };
-    let cmp = if range.inclusive { "<=" } else { "<" };
-    let body_render = lower_expr(body, casts, types, structs, variants, fn_names, def_names, type_names);
-    format!(
-        "{{ let __start = {start}; let __end = {end}; let __step = {step}; {mut_decl} loop {{ {var} = {var} + __step; if !({var} {cmp} __end) {{ break; }} {body_render}; }} }}",
-        start = start,
-        end = end,
-        step = step,
-        mut_decl = mut_decl,
-        var = var,
-        cmp = cmp,
-        body_render = body_render
-    )
+    match iter {
+        crate::ast::Iterable::Range(range) => {
+            let start = lower_expr(&range.start, casts, types, structs, variants, fn_names, def_names, type_names);
+            let end = lower_expr(&range.end, casts, types, structs, variants, fn_names, def_names, type_names);
+            let ty = expr_ty(types, &range.start.span());
+            let step = if let Some(step) = &range.step {
+                lower_expr(step, casts, types, structs, variants, fn_names, def_names, type_names)
+            } else {
+                default_step_for_ty(ty.as_ref(), type_names)
+            };
+            let mut_decl = if let Some(ty) = ty.as_ref() {
+                format!("let mut {}: {} = __start - __step;", var, ty_rust(ty, type_names))
+            } else {
+                format!("let mut {} = __start - __step;", var)
+            };
+            let cmp = if range.inclusive { "<=" } else { "<" };
+            let body_render = lower_expr(body, casts, types, structs, variants, fn_names, def_names, type_names);
+            format!(
+                "{{ let __start = {start}; let __end = {end}; let __step = {step}; {mut_decl} loop {{ {var} = {var} + __step; if !({var} {cmp} __end) {{ break; }} {body_render}; }} }}",
+                start = start,
+                end = end,
+                step = step,
+                mut_decl = mut_decl,
+                var = var,
+                cmp = cmp,
+                body_render = body_render
+            )
+        }
+        crate::ast::Iterable::Expr(ex) => {
+            let vec_expr = lower_expr(ex, casts, types, structs, variants, fn_names, def_names, type_names);
+            let body_render = lower_expr(body, casts, types, structs, variants, fn_names, def_names, type_names);
+            format!("{{ for {} in ({}).into_iter() {{ {}; }} }}", var, vec_expr, body_render)
+        }
+    }
 }
 
 fn default_step_for_ty(ty: Option<&Ty>, type_names: &BTreeMap<String, String>) -> String {

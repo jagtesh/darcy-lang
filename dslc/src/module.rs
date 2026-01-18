@@ -349,9 +349,9 @@ fn resolve_expr(res: &Resolver, e: &Expr) -> DslResult<Expr> {
             body: Box::new(resolve_expr(res, body)?),
             span: span.clone(),
         }),
-        Expr::For { var, range, body, span } => Ok(Expr::For {
+        Expr::For { var, iter, body, span } => Ok(Expr::For {
             var: var.clone(),
-            range: resolve_range(res, range)?,
+            iter: resolve_iterable(res, iter)?,
             body: Box::new(resolve_expr(res, body)?),
             span: span.clone(),
         }),
@@ -474,6 +474,13 @@ fn resolve_range(res: &Resolver, range: &crate::ast::RangeExpr) -> DslResult<cra
         inclusive: range.inclusive,
         span: range.span.clone(),
     })
+}
+
+fn resolve_iterable(res: &Resolver, iter: &crate::ast::Iterable) -> DslResult<crate::ast::Iterable> {
+    match iter {
+        crate::ast::Iterable::Range(r) => Ok(crate::ast::Iterable::Range(resolve_range(res, r)?)),
+        crate::ast::Iterable::Expr(e) => Ok(crate::ast::Iterable::Expr(Box::new(resolve_expr(res, e)?))),
+    }
 }
 
 fn expand_inline_call(
@@ -599,9 +606,9 @@ fn inline_subst(expr: &Expr, map: &BTreeMap<String, Expr>) -> Expr {
             body: Box::new(inline_subst(body, map)),
             span: span.clone(),
         },
-        Expr::For { var, range, body, span } => Expr::For {
+        Expr::For { var, iter, body, span } => Expr::For {
             var: var.clone(),
-            range: inline_subst_range(range, map),
+            iter: inline_subst_iterable(iter, map),
             body: Box::new(inline_subst(body, map)),
             span: span.clone(),
         },
@@ -667,6 +674,13 @@ fn inline_subst_range(range: &crate::ast::RangeExpr, map: &BTreeMap<String, Expr
         step: range.step.as_ref().map(|s| Box::new(inline_subst(s, map))),
         inclusive: range.inclusive,
         span: range.span.clone(),
+    }
+}
+
+fn inline_subst_iterable(iter: &crate::ast::Iterable, map: &BTreeMap<String, Expr>) -> crate::ast::Iterable {
+    match iter {
+        crate::ast::Iterable::Range(r) => crate::ast::Iterable::Range(inline_subst_range(r, map)),
+        crate::ast::Iterable::Expr(e) => crate::ast::Iterable::Expr(Box::new(inline_subst(e, map))),
     }
 }
 

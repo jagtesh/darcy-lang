@@ -38,6 +38,14 @@ fn lowers_for_range_incl() {
 }
 
 #[test]
+fn lowers_for_for_x_y() {
+    let src = "(defn main [] (for i (vec<i32> 1 2 3) (dbg i)))";
+    let out = compile(src).expect("compile ok");
+    assert!(out.contains("for i in (vec![1i32, 2i32, 3i32]).into_iter() {"), "{}", out);
+}
+
+
+#[test]
 fn lowers_do_sequence() {
     let src = "(defn main [] (do (dbg 1) (dbg 2)))";
     let out = compile(src).expect("compile ok");
