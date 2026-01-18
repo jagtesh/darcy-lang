@@ -6,8 +6,8 @@
 (use core.result :as res)
 (use core.hashmap :as hmap)
 (use core.btreemap :as bmap)
-
-(defstruct demo
+ 
+(defrecord demo
   (greeting string)
   (str-len usize)
   (str-empty bool)
@@ -38,7 +38,7 @@
   (bmap-get option<i32>)
   (bmap-insert btreemap<string,i32>)
   (bmap-remove btreemap<string,i32>))
-
+ 
 (defn main []
   (fmt/dbg
     (demo

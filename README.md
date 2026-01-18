@@ -3,7 +3,7 @@
 This is a tiny proof-of-concept "Elm-ish typed Lisp" frontend that lowers to Rust.
 
 What it supports (MVP):
- - `(defstruct name (field type) ...)`
+ - `(defrecord name (field type) ...)` (alias: `defstruct`)
  - `(defn name [params] expr)`
  - `(def name expr)`
    - params are symbols like `o:order` (type annotation required unless inference is unambiguous)
@@ -18,15 +18,17 @@ What it supports (MVP):
   - variables
   - field access sugar: `o.qty`
   - binary ops: `+ - * /` in prefix form: `(* a b)`
-  - unions + match: `(defunion name (variant (field Type) ...) ...)`, `(match x (variant (field v) expr) (_ expr))`
+  - unions + case: `(defenum name (variant (field Type) ...) ...)`, `(case x (variant (field v) expr) (_ expr))` (aliases: `defunion`, `match`)
+  - booleans, nil, and keywords: `true`, `false`, `nil`, `:key`
   - vectors: `[1 2 3]`, `(vec<i32> 1 2 3)`
   - vector index: `(core.vec/get v i)`, `(core.vec/set v i x)`
+  - map literals: `{:a 1 :b 2}`
   - debug print: `(dbg expr)`
   - formatted print: `(core.fmt/print "x={}\n" x)`, `(core.fmt/println "x={}" x)`
-  - extern wrapper: `(extern (defstruct ...))`, `(extern (defunion ...))`, `(extern (defn name [params] RetType))`
+  - extern wrapper: `(extern (defrecord ...))`, `(extern (defenum ...))`, `(extern (defn name [params] RetType))`
   - inline expansion: `(defin name [params] expr)`
   - comments: `; line` and `#| block |#`
-  - modules: `(use std.io)`, `(use std.io :as io)`, `(use std.io :only (dbg))`, `(open std.io)`
+  - modules: `(use std.io)`, `(require std.io)`, `(use std.io :as io)`, `(use std.io :only (dbg))`, `(open std.io)`
 
 What it does NOT support yet:
 - borrowing/ownership surface syntax

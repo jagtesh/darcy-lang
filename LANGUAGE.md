@@ -16,13 +16,17 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
   - Line: `; comment`
   - Block: `#| comment |#`
 - **Strings**: double-quoted, e.g. `"hello"`. Escapes: `\\`, `\"`, `\n`, `\t`, `\r`.
-- **Reserved keywords** (cannot be used as identifiers): `def`, `defn`, `defin`, `defstruct`, `defunion`, `extern`, `match`, `if`, `do`, `loop`, `while`, `for`, `break`, `continue`, `let`, `fn`, `call`, `use`, `open`, `vec`, `range`, `range-incl`.
+- **Reserved keywords** (cannot be used as identifiers): `def`, `defn`, `defin`, `defstruct`, `defunion`, `defrecord`, `defenum`, `extern`, `match`, `case`, `if`, `do`, `loop`, `while`, `for`, `break`, `continue`, `let`, `fn`, `call`, `use`, `require`, `open`, `vec`, `range`, `range-incl`, `true`, `false`, `nil`.
 
 ## Literals
 
 - Integers default to `i32`.
 - Floats default to `f64`.
+- Booleans: `true`, `false`.
+- Unit: `nil` (lowered to `()`).
+- Keywords: `:foo` (lowered to a `string`).
 - Vectors: `[1 2 3]`.
+- Maps: `{:a 1 :b 2}` (hash map literals).
 
 ## Types
 
@@ -44,25 +48,25 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 
 ## Top-Level Forms
 
-### Structs
+### Structs (Records)
 
 ```
-(defstruct order
+(defrecord order
   (qty u32)
   (price f64))
 ```
 
-- Field types can be omitted when inferable: `(defstruct order (qty) (price))`.
+- Field types can be omitted when inferable: `(defrecord order (qty) (price))`.
 
 ### Unions (discriminated unions)
 
 ```
-(defunion result
+(defenum result
   (ok (value i32))
   (err (code i32) (msg i32)))
 ```
 
-- Variant field types can be omitted when inferable: `(defunion result (ok (value)) (err (code) (msg)))`.
+- Variant field types can be omitted when inferable: `(defenum result (ok (value)) (err (code) (msg)))`.
 
 ### Functions
 
@@ -133,13 +137,13 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 ### Extern
 
 ```
-(extern (defstruct file (fd i32)))
-(extern "File" (defstruct file (fd i32)))
-(extern (defunion io-error (not-found) (perm)))
+(extern (defrecord file (fd i32)))
+(extern "File" (defrecord file (fd i32)))
+(extern (defenum io-error (not-found) (perm)))
 (extern (defn write [f:file data:i32] i32))
 ```
 
-- `extern` wraps `defstruct`, `defunion`, or `defn`.
+- `extern` wraps `defrecord`/`defstruct`, `defenum`/`defunion`, or `defn`.
 - Extern functions must declare a return type and parameter types.
 
 ## Expressions
@@ -157,10 +161,16 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 
 - Prefix form: `(+ a b)`, `(total o)`.
 
-### Match
+### Literals
+
+- `true` / `false` are boolean literals.
+- `nil` lowers to unit `()`.
+- Keywords like `:status` lower to strings (e.g. `":status"`).
+
+### Match / Case
 
 ```
-(match x
+(case x
   (ok (value v) v)
   (err (code c) c)
   (_ 0))
@@ -168,6 +178,7 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 
 - Patterns are variant names with bindings.
 - Exhaustive by default; `_` is a wildcard.
+- `match` is accepted as an alias of `case`.
 
 ### Vectors
 
@@ -185,7 +196,9 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 ### Maps
 
 - Hash map literal:
+  - `{:a 1 :b 2}`
   - `(core.hashmap/new ("a" 1) ("b" 2))`
+  - `{ "a" 1 "b" 2 }`
 - B-tree map literal:
   - `(core.btreemap/new ("a" 1) ("b" 2))`
 - Empty map requires annotation:
@@ -193,7 +206,7 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 
 ## Modules and Imports
 
-Modules are files addressed by dot-separated symbols and brought into scope with `use` or `open`.
+Modules are files addressed by dot-separated symbols and brought into scope with `use`/`require` or `open`.
 
 ### Module Paths
 
@@ -215,12 +228,14 @@ Module search paths are:
 
 ```
 (use std.io)
+(require std.io)
 (use std.io :as io)
 (use std.io :only (dbg read))
 (open std.io)
 ```
 
 - `use` keeps names under their module unless `:only` is used.
+- `require` is accepted as an alias of `use`.
 - `:as` creates an alias prefix.
 - `:only` imports named items into the current namespace.
 - `open` imports everything into the current namespace.
@@ -279,7 +294,7 @@ The current system is monomorphic and unification-based (HM-style without genera
 ## Example
 
 ```
-(defstruct order (qty i32) (price f64))
+(defrecord order (qty i32) (price f64))
 
 (defn total [o]
   (* o.qty o.price))

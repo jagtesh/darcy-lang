@@ -1,17 +1,19 @@
-(defunion shape
+; Stage 0: basic types, functions, and control flow
+ 
+(defenum shape
   (circle (radius))
   (rect (w) (h))
   (point))
-
-(defin square [x]
-  (* x x))
-
-(defn area [s:shape]
-  (match s
-    (circle (radius r) (square r))
-    (rect (w w) (h h) (* w h))
-    (point 0.0)))
-
+ 
+ (defin square [x]
+   (* x x))
+ 
+ (defn area [s:shape]
+    (case s
+      (circle (radius r) (square r))
+      (rect (w w) (h h) (* w h))
+      (point 0.0)))
+ 
 (defn main []
   (do
     (dbg (area (circle 3.0)))

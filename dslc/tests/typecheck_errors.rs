@@ -24,7 +24,7 @@ fn rejects_missing_field() {
 
 #[test]
 fn rejects_unconstrained_param() {
-    let src = "(defstruct order (qty u32)) (defn total [o] o)";
+    let src = "(defrecord order (qty u32)) (defn total [o] o)";
     let err = compile(src).expect_err("expected inference error");
     assert!(
         err.message.contains("cannot infer type for parameter"),

@@ -32,11 +32,37 @@ pub struct TypedExpr {
     pub types: BTreeMap<SpanKey, Ty>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParamMode {
+    ByVal,
+    ByRef,
+    ByRefNoAmp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GenericBound {
+    Copy,
+    Clone,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    PartialEq,
+    PartialOrd,
+    Len,
+    IsEmpty,
+    Push(Ty),
+    FromInt,
+}
+
 #[derive(Debug, Clone)]
 pub struct TypedFn {
     pub def: FnDef,
     pub param_tys: BTreeMap<String, Ty>,
+    pub param_modes: BTreeMap<String, ParamMode>,
+    pub generic_bounds: BTreeMap<u32, Vec<GenericBound>>,
     pub body: TypedExpr,
+    pub mutated: std::collections::BTreeSet<String>,
 }
 
 #[derive(Debug, Clone)]

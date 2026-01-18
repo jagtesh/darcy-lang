@@ -37,3 +37,17 @@ fn lexes_string_escapes() {
     }
     assert!(found, "expected string token");
 }
+
+#[test]
+fn lexes_braces() {
+    let src = "{:a 1}";
+    let toks = lex(src).expect("lex ok");
+    let kinds: Vec<TokKind> = toks.into_iter().map(|t| t.kind).collect();
+    let expected = vec![
+        TokKind::LBrace,
+        TokKind::Sym(":a".to_string()),
+        TokKind::Int(1),
+        TokKind::RBrace,
+    ];
+    assert_eq!(kinds, expected);
+}

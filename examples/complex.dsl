@@ -1,4 +1,4 @@
-(defstruct order
+(defrecord order
   (id i32)
   (qty i32)
   (price f64))

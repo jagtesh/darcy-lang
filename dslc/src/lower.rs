@@ -106,8 +106,9 @@ pub fn lower_program(pipeline: &PipelineOutput) -> DslResult<String> {
                 Diag::new("internal error: missing typed def").with_span(d.span.clone())
             })?;
             if typed.def.name != d.name {
-                return Err(Diag::new("internal error: typed def order mismatch")
-                    .with_span(d.span.clone()));
+                return Err(
+                    Diag::new("internal error: typed def order mismatch").with_span(d.span.clone())
+                );
             }
             let ty = ty_rust(&typed.body.ty, &type_names);
             let expr = lower_expr(
@@ -146,7 +147,10 @@ pub fn lower_program(pipeline: &PipelineOutput) -> DslResult<String> {
             if is_main {
                 out.push_str(") {\n");
             } else {
-                out.push_str(&format!(") -> {} {{\n", ty_rust(&typed.body.ty, &type_names)));
+                out.push_str(&format!(
+                    ") -> {} {{\n",
+                    ty_rust(&typed.body.ty, &type_names)
+                ));
             }
             out.push_str("    ");
             out.push_str(&lower_expr(
@@ -213,6 +217,12 @@ fn lower_expr(
             let lit = format!("{:?}", s);
             format!("String::from({})", lit)
         }
+        Expr::Bool(v, _) => v.to_string(),
+        Expr::Unit(_) => "()".to_string(),
+        Expr::Keyword(s, _) => {
+            let lit = format!("{:?}", s);
+            format!("String::from({})", lit)
+        }
         Expr::Pair { .. } => "/* invalid pair */".to_string(),
         Expr::Var(v, _) => {
             if let Some(def) = def_names.get(v) {
@@ -221,12 +231,22 @@ fn lower_expr(
                 v.clone()
             }
         }
-        Expr::If { cond, then_br, else_br, .. } => {
-            let cond = lower_expr(cond, casts, types, structs, variants, fn_names, def_names, type_names);
-            let then_br = lower_expr(then_br, casts, types, structs, variants, fn_names, def_names, type_names);
+        Expr::If {
+            cond,
+            then_br,
+            else_br,
+            ..
+        } => {
+            let cond = lower_expr(
+                cond, casts, types, structs, variants, fn_names, def_names, type_names,
+            );
+            let then_br = lower_expr(
+                then_br, casts, types, structs, variants, fn_names, def_names, type_names,
+            );
             if let Some(else_br) = else_br {
-                let else_br =
-                    lower_expr(else_br, casts, types, structs, variants, fn_names, def_names, type_names);
+                let else_br = lower_expr(
+                    else_br, casts, types, structs, variants, fn_names, def_names, type_names,
+                );
                 format!("if {} {{ {} }} else {{ {} }}", cond, then_br, else_br)
             } else {
                 format!("if {} {{ {} }} else {{ () }}", cond, then_br)
@@ -235,7 +255,9 @@ fn lower_expr(
         Expr::Do { exprs, .. } => {
             let mut parts = Vec::new();
             for (idx, ex) in exprs.iter().enumerate() {
-                let rendered = lower_expr(ex, casts, types, structs, variants, fn_names, def_names, type_names);
+                let rendered = lower_expr(
+                    ex, casts, types, structs, variants, fn_names, def_names, type_names,
+                );
                 if idx + 1 == exprs.len() {
                     parts.push(rendered);
                 } else {
@@ -247,7 +269,9 @@ fn lower_expr(
         Expr::Let { bindings, body, .. } => {
             let mut parts = Vec::new();
             for b in bindings {
-                let expr = lower_expr(&b.expr, casts, types, structs, variants, fn_names, def_names, type_names);
+                let expr = lower_expr(
+                    &b.expr, casts, types, structs, variants, fn_names, def_names, type_names,
+                );
                 if let Some(ann) = &b.ann {
                     parts.push(format!(
                         "let {}: {} = {};",
@@ -259,7 +283,9 @@ fn lower_expr(
                     parts.push(format!("let {} = {};", b.rust_name, expr));
                 }
             }
-            let body = lower_expr(body, casts, types, structs, variants, fn_names, def_names, type_names);
+            let body = lower_expr(
+                body, casts, types, structs, variants, fn_names, def_names, type_names,
+            );
             format!("{{ {} {} }}", parts.join(" "), body)
         }
         Expr::Lambda { params, body, .. } => {
@@ -271,32 +297,50 @@ fn lower_expr(
                     rendered.push(p.rust_name.clone());
                 }
             }
-            let body = lower_expr(body, casts, types, structs, variants, fn_names, def_names, type_names);
+            let body = lower_expr(
+                body, casts, types, structs, variants, fn_names, def_names, type_names,
+            );
             format!("|{}| {{ {} }}", rendered.join(", "), body)
         }
         Expr::CallDyn { func, args, .. } => {
-            let func = lower_expr(func, casts, types, structs, variants, fn_names, def_names, type_names);
+            let func = lower_expr(
+                func, casts, types, structs, variants, fn_names, def_names, type_names,
+            );
             let rendered: Vec<String> = args
                 .iter()
-                .map(|el| lower_expr(el, casts, types, structs, variants, fn_names, def_names, type_names))
+                .map(|el| {
+                    lower_expr(
+                        el, casts, types, structs, variants, fn_names, def_names, type_names,
+                    )
+                })
                 .collect();
             format!("({})({})", func, rendered.join(", "))
         }
         Expr::Loop { body, .. } => {
-            let body = lower_expr(body, casts, types, structs, variants, fn_names, def_names, type_names);
+            let body = lower_expr(
+                body, casts, types, structs, variants, fn_names, def_names, type_names,
+            );
             format!("loop {{ {}; }}", body)
         }
         Expr::While { cond, body, .. } => {
-            let cond = lower_expr(cond, casts, types, structs, variants, fn_names, def_names, type_names);
-            let body = lower_expr(body, casts, types, structs, variants, fn_names, def_names, type_names);
+            let cond = lower_expr(
+                cond, casts, types, structs, variants, fn_names, def_names, type_names,
+            );
+            let body = lower_expr(
+                body, casts, types, structs, variants, fn_names, def_names, type_names,
+            );
             format!("loop {{ if !({}) {{ break; }} {}; }}", cond, body)
         }
-        Expr::For { var, iter, body, .. } => {
-            lower_for_expr(var, iter, body, casts, types, structs, variants, fn_names, def_names, type_names)
-        }
+        Expr::For {
+            var, iter, body, ..
+        } => lower_for_expr(
+            var, iter, body, casts, types, structs, variants, fn_names, def_names, type_names,
+        ),
         Expr::Break { value, .. } => {
             if let Some(v) = value {
-                let v = lower_expr(v, casts, types, structs, variants, fn_names, def_names, type_names);
+                let v = lower_expr(
+                    v, casts, types, structs, variants, fn_names, def_names, type_names,
+                );
                 format!("break {}", v)
             } else {
                 "break".to_string()
@@ -310,8 +354,12 @@ fn lower_expr(
             };
             let mut parts = Vec::new();
             for (k, v) in entries {
-                let k = lower_expr(k, casts, types, structs, variants, fn_names, def_names, type_names);
-                let v = lower_expr(v, casts, types, structs, variants, fn_names, def_names, type_names);
+                let k = lower_expr(
+                    k, casts, types, structs, variants, fn_names, def_names, type_names,
+                );
+                let v = lower_expr(
+                    v, casts, types, structs, variants, fn_names, def_names, type_names,
+                );
                 parts.push(format!("__m.insert({}, {});", k, v));
             }
             if parts.is_empty() {
@@ -334,16 +382,25 @@ fn lower_expr(
             } else {
                 let rendered: Vec<String> = elems
                     .iter()
-                    .map(|el| lower_expr(el, casts, types, structs, variants, fn_names, def_names, type_names))
+                    .map(|el| {
+                        lower_expr(
+                            el, casts, types, structs, variants, fn_names, def_names, type_names,
+                        )
+                    })
                     .collect();
                 format!("vec![{}]", rendered.join(", "))
             }
         }
-        Expr::Field { base, field, span: _ } => {
+        Expr::Field {
+            base,
+            field,
+            span: _,
+        } => {
             let base_ty = expr_ty(types, &base.span());
             if let Some(Ty::Vec(_)) = base_ty {
-                let base_expr =
-                    lower_expr(base, casts, types, structs, variants, fn_names, def_names, type_names);
+                let base_expr = lower_expr(
+                    base, casts, types, structs, variants, fn_names, def_names, type_names,
+                );
                 format!(
                     "({}).into_iter().map(|__x| __x.{}).collect::<Vec<_>>()",
                     base_expr, field
@@ -351,14 +408,19 @@ fn lower_expr(
             } else {
                 format!(
                     "{}.{}",
-                    lower_expr(base, casts, types, structs, variants, fn_names, def_names, type_names),
+                    lower_expr(
+                        base, casts, types, structs, variants, fn_names, def_names, type_names
+                    ),
                     field
                 )
             }
         }
-        Expr::Match { scrutinee, arms, .. } => {
-            let scrut =
-                lower_expr(scrutinee, casts, types, structs, variants, fn_names, def_names, type_names);
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            let scrut = lower_expr(
+                scrutinee, casts, types, structs, variants, fn_names, def_names, type_names,
+            );
             let mut rendered = String::new();
             rendered.push_str(&format!("match {} {{ ", scrut));
             for arm in arms {
@@ -373,10 +435,8 @@ fn lower_expr(
                                 .cloned()
                                 .unwrap_or_else(|| rust_type_name(union_name));
                             if vdef.fields.is_empty() {
-                                rendered.push_str(&format!(
-                                    "{}::{} => ",
-                                    union_rust, vdef.rust_name
-                                ));
+                                rendered
+                                    .push_str(&format!("{}::{} => ", union_rust, vdef.rust_name));
                             } else {
                                 let mut parts = Vec::new();
                                 for (field, binding, _) in bindings {
@@ -398,8 +458,9 @@ fn lower_expr(
                         }
                     }
                 }
-                let body =
-                    lower_expr(&arm.body, casts, types, structs, variants, fn_names, def_names, type_names);
+                let body = lower_expr(
+                    &arm.body, casts, types, structs, variants, fn_names, def_names, type_names,
+                );
                 rendered.push_str(&format!("{}, ", body));
             }
             rendered.push_str("}");
@@ -409,19 +470,25 @@ fn lower_expr(
             if (op == "dbg" || op == "std.io/dbg" || op == "core.fmt/dbg") && args.len() == 1 {
                 return format!(
                     "println!(\"{{:?}}\", {})",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if op == "core.fmt/format" && args.len() == 1 {
                 return format!(
                     "format!(\"{{:?}}\", {})",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if op == "core.fmt/pretty" && args.len() == 1 {
                 return format!(
                     "format!(\"{{:#?}}\", {})",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if (op == "core.fmt/print" || op == "core.fmt/println") && !args.is_empty() {
@@ -437,7 +504,12 @@ fn lower_expr(
                     }
                     let rendered: Vec<String> = args[1..]
                         .iter()
-                        .map(|el| lower_expr(el, casts, types, structs, variants, fn_names, def_names, type_names))
+                        .map(|el| {
+                            lower_expr(
+                                el, casts, types, structs, variants, fn_names, def_names,
+                                type_names,
+                            )
+                        })
                         .collect();
                     return format!("{}!({}, {})", macro_name, fmt, rendered.join(", "));
                 }
@@ -454,8 +526,12 @@ fn lower_expr(
                 let mut parts = Vec::new();
                 for entry in args {
                     if let Expr::Pair { key, val, .. } = entry {
-                        let k = lower_expr(key, casts, types, structs, variants, fn_names, def_names, type_names);
-                        let v = lower_expr(val, casts, types, structs, variants, fn_names, def_names, type_names);
+                        let k = lower_expr(
+                            key, casts, types, structs, variants, fn_names, def_names, type_names,
+                        );
+                        let v = lower_expr(
+                            val, casts, types, structs, variants, fn_names, def_names, type_names,
+                        );
                         parts.push(format!("__m.insert({}, {});", k, v));
                     }
                 }
@@ -470,24 +546,38 @@ fn lower_expr(
             if op == "core.vec/len" && args.len() == 1 {
                 return format!(
                     "({}).len()",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if op == "core.vec/is-empty" && args.len() == 1 {
                 return format!(
                     "({}).is_empty()",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if op == "core.vec/get" && args.len() == 2 {
-                let v = lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names);
-                let idx = lower_expr(&args[1], casts, types, structs, variants, fn_names, def_names, type_names);
+                let v = lower_expr(
+                    &args[0], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
+                let idx = lower_expr(
+                    &args[1], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
                 return format!("({})[({}) as usize].clone()", v, idx);
             }
             if op == "core.vec/set" && args.len() == 3 {
-                let v = lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names);
-                let idx = lower_expr(&args[1], casts, types, structs, variants, fn_names, def_names, type_names);
-                let val = lower_expr(&args[2], casts, types, structs, variants, fn_names, def_names, type_names);
+                let v = lower_expr(
+                    &args[0], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
+                let idx = lower_expr(
+                    &args[1], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
+                let val = lower_expr(
+                    &args[2], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
                 return format!(
                     "{{ let mut __v = ({}).clone(); __v[({}) as usize] = {}; () }}",
                     v, idx, val
@@ -496,41 +586,54 @@ fn lower_expr(
             if op == "core.str/len" && args.len() == 1 {
                 return format!(
                     "({}).len()",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if op == "core.str/is-empty" && args.len() == 1 {
                 return format!(
                     "({}).is_empty()",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if op == "core.str/trim" && args.len() == 1 {
                 return format!(
                     "({}).trim().to_string()",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if op == "core.str/split" && args.len() == 2 {
-                let s = lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names);
-                let sep =
-                    lower_expr(&args[1], casts, types, structs, variants, fn_names, def_names, type_names);
+                let s = lower_expr(
+                    &args[0], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
+                let sep = lower_expr(
+                    &args[1], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
                 return format!(
                     "({}).split(({}).as_str()).map(String::from).collect::<Vec<_>>()",
                     s, sep
                 );
             }
             if op == "core.str/join" && args.len() == 2 {
-                let items =
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names);
-                let sep =
-                    lower_expr(&args[1], casts, types, structs, variants, fn_names, def_names, type_names);
+                let items = lower_expr(
+                    &args[0], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
+                let sep = lower_expr(
+                    &args[1], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
                 return format!("({}).join(({}).as_str())", items, sep);
             }
             if op == "core.option/some" && args.len() == 1 {
                 return format!(
                     "Some({})",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if op == "core.option/none" && args.is_empty() {
@@ -544,8 +647,9 @@ fn lower_expr(
                 return "Option::<()>::None".to_string();
             }
             if op == "core.result/ok" && args.len() == 1 {
-                let val =
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names);
+                let val = lower_expr(
+                    &args[0], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
                 if let Some(Ty::Result(ok_ty, err_ty)) = expr_ty(types, span) {
                     let ok = ty_rust_default(&ok_ty, type_names, "_");
                     let err = ty_rust_default(&err_ty, type_names, "()");
@@ -554,8 +658,9 @@ fn lower_expr(
                 return format!("Result::<_, ()>::Ok({})", val);
             }
             if op == "core.result/err" && args.len() == 1 {
-                let val =
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names);
+                let val = lower_expr(
+                    &args[0], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
                 if let Some(Ty::Result(ok_ty, err_ty)) = expr_ty(types, span) {
                     let ok = ty_rust_default(&ok_ty, type_names, "()");
                     let err = ty_rust_default(&err_ty, type_names, "_");
@@ -566,80 +671,104 @@ fn lower_expr(
             if op == "core.option/is-some" && args.len() == 1 {
                 return format!(
                     "({}).is_some()",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if op == "core.option/is-none" && args.len() == 1 {
                 return format!(
                     "({}).is_none()",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if op == "core.option/unwrap" && args.len() == 1 {
                 return format!(
                     "({}).unwrap()",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if op == "core.option/unwrap-or" && args.len() == 2 {
-                let opt =
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names);
-                let fallback =
-                    lower_expr(&args[1], casts, types, structs, variants, fn_names, def_names, type_names);
+                let opt = lower_expr(
+                    &args[0], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
+                let fallback = lower_expr(
+                    &args[1], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
                 return format!("({}).unwrap_or({})", opt, fallback);
             }
             if op == "core.result/ok" && args.len() == 1 {
                 return format!(
                     "Ok({})",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if op == "core.result/err" && args.len() == 1 {
                 return format!(
                     "Err({})",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if op == "core.result/is-ok" && args.len() == 1 {
                 return format!(
                     "({}).is_ok()",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if op == "core.result/is-err" && args.len() == 1 {
                 return format!(
                     "({}).is_err()",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if op == "core.result/unwrap" && args.len() == 1 {
                 return format!(
                     "({}).unwrap()",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if op == "core.result/unwrap-or" && args.len() == 2 {
-                let res =
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names);
-                let fallback =
-                    lower_expr(&args[1], casts, types, structs, variants, fn_names, def_names, type_names);
+                let res = lower_expr(
+                    &args[0], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
+                let fallback = lower_expr(
+                    &args[1], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
                 return format!("({}).unwrap_or({})", res, fallback);
             }
             if op == "core.hashmap/get" || op == "core.btreemap/get" {
                 if args.len() == 2 {
-                    let map =
-                        lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names);
-                    let key =
-                        lower_expr(&args[1], casts, types, structs, variants, fn_names, def_names, type_names);
+                    let map = lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names,
+                    );
+                    let key = lower_expr(
+                        &args[1], casts, types, structs, variants, fn_names, def_names, type_names,
+                    );
                     return format!("({}).get(&{}).cloned()", map, key);
                 }
             }
             if op == "core.hashmap/contains" || op == "core.btreemap/contains" {
                 if args.len() == 2 {
-                    let map =
-                        lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names);
-                    let key =
-                        lower_expr(&args[1], casts, types, structs, variants, fn_names, def_names, type_names);
+                    let map = lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names,
+                    );
+                    let key = lower_expr(
+                        &args[1], casts, types, structs, variants, fn_names, def_names, type_names,
+                    );
                     return format!("({}).contains_key(&{})", map, key);
                 }
             }
@@ -647,7 +776,10 @@ fn lower_expr(
                 if args.len() == 1 {
                     return format!(
                         "({}).len()",
-                        lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                        lower_expr(
+                            &args[0], casts, types, structs, variants, fn_names, def_names,
+                            type_names
+                        )
                     );
                 }
             }
@@ -655,18 +787,24 @@ fn lower_expr(
                 if args.len() == 1 {
                     return format!(
                         "({}).is_empty()",
-                        lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                        lower_expr(
+                            &args[0], casts, types, structs, variants, fn_names, def_names,
+                            type_names
+                        )
                     );
                 }
             }
             if op == "core.hashmap/insert" || op == "core.btreemap/insert" {
                 if args.len() == 3 {
-                    let map =
-                        lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names);
-                    let key =
-                        lower_expr(&args[1], casts, types, structs, variants, fn_names, def_names, type_names);
-                    let val =
-                        lower_expr(&args[2], casts, types, structs, variants, fn_names, def_names, type_names);
+                    let map = lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names,
+                    );
+                    let key = lower_expr(
+                        &args[1], casts, types, structs, variants, fn_names, def_names, type_names,
+                    );
+                    let val = lower_expr(
+                        &args[2], casts, types, structs, variants, fn_names, def_names, type_names,
+                    );
                     return format!(
                         "{{ let mut __m = ({}).clone(); __m.insert({}, {}); __m }}",
                         map, key, val
@@ -675,10 +813,12 @@ fn lower_expr(
             }
             if op == "core.hashmap/remove" || op == "core.btreemap/remove" {
                 if args.len() == 2 {
-                    let map =
-                        lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names);
-                    let key =
-                        lower_expr(&args[1], casts, types, structs, variants, fn_names, def_names, type_names);
+                    let map = lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names,
+                    );
+                    let key = lower_expr(
+                        &args[1], casts, types, structs, variants, fn_names, def_names, type_names,
+                    );
                     return format!(
                         "{{ let mut __m = ({}).clone(); __m.remove(&{}); __m }}",
                         map, key
@@ -688,25 +828,41 @@ fn lower_expr(
             if op == "core.num/abs" && args.len() == 1 {
                 return format!(
                     "({}).abs()",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 );
             }
             if (op == "core.num/min" || op == "core.num/max") && args.len() == 2 {
-                let a = lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names);
-                let b = lower_expr(&args[1], casts, types, structs, variants, fn_names, def_names, type_names);
+                let a = lower_expr(
+                    &args[0], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
+                let b = lower_expr(
+                    &args[1], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
                 let meth = if op == "core.num/min" { "min" } else { "max" };
                 return format!("({}).{}({})", a, meth, b);
             }
             if op == "core.num/clamp" && args.len() == 3 {
-                let x = lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names);
-                let lo = lower_expr(&args[1], casts, types, structs, variants, fn_names, def_names, type_names);
-                let hi = lower_expr(&args[2], casts, types, structs, variants, fn_names, def_names, type_names);
+                let x = lower_expr(
+                    &args[0], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
+                let lo = lower_expr(
+                    &args[1], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
+                let hi = lower_expr(
+                    &args[2], casts, types, structs, variants, fn_names, def_names, type_names,
+                );
                 return format!("({}).clamp({}, {})", x, lo, hi);
             }
             if let Some(sd) = structs.get(op) {
                 let rendered: Vec<String> = args
                     .iter()
-                    .map(|el| lower_expr(el, casts, types, structs, variants, fn_names, def_names, type_names))
+                    .map(|el| {
+                        lower_expr(
+                            el, casts, types, structs, variants, fn_names, def_names, type_names,
+                        )
+                    })
                     .collect();
                 let mut parts = Vec::new();
                 for (field, expr) in sd.fields.iter().zip(rendered.iter()) {
@@ -721,7 +877,11 @@ fn lower_expr(
                     .unwrap_or_else(|| rust_type_name(union_name));
                 let rendered: Vec<String> = args
                     .iter()
-                    .map(|el| lower_expr(el, casts, types, structs, variants, fn_names, def_names, type_names))
+                    .map(|el| {
+                        lower_expr(
+                            el, casts, types, structs, variants, fn_names, def_names, type_names,
+                        )
+                    })
                     .collect();
                 let mut parts = Vec::new();
                 for (field, expr) in vdef.fields.iter().zip(rendered.iter()) {
@@ -730,7 +890,12 @@ fn lower_expr(
                 return if vdef.fields.is_empty() {
                     format!("{}::{}", union_rust, vdef.rust_name)
                 } else {
-                    format!("{}::{} {{ {} }}", union_rust, vdef.rust_name, parts.join(", "))
+                    format!(
+                        "{}::{} {{ {} }}",
+                        union_rust,
+                        vdef.rust_name,
+                        parts.join(", ")
+                    )
                 };
             }
             if args.len() == 2 && ["+", "-", "*", "/"].contains(&op.as_str()) {
@@ -738,49 +903,123 @@ fn lower_expr(
                 let right_ty = expr_ty(types, &args[1].span());
                 if let (Some(Ty::Vec(_)), Some(right_ty)) = (left_ty.clone(), right_ty.clone()) {
                     return vec_scalar_binop(
-                        op,
-                        &args[0],
-                        &args[1],
-                        casts,
-                        types,
-                        structs,
-                        variants,
-                        fn_names,
-                        def_names,
-                        type_names,
-                        true,
-                        &right_ty,
+                        op, &args[0], &args[1], casts, types, structs, variants, fn_names,
+                        def_names, type_names, true, &right_ty,
                     );
                 }
                 if let (Some(left_ty), Some(Ty::Vec(_))) = (left_ty.clone(), right_ty.clone()) {
                     return vec_scalar_binop(
-                        op,
-                        &args[0],
-                        &args[1],
-                        casts,
-                        types,
-                        structs,
-                        variants,
-                        fn_names,
-                        def_names,
-                        type_names,
-                        false,
-                        &left_ty,
+                        op, &args[0], &args[1], casts, types, structs, variants, fn_names,
+                        def_names, type_names, false, &left_ty,
                     );
                 }
                 format!(
                     "({} {} {})",
-                    lower_expr(&args[0], casts, types, structs, variants, fn_names, def_names, type_names),
+                    lower_expr(
+                        &args[0], casts, types, structs, variants, fn_names, def_names, type_names
+                    ),
                     op,
-                    lower_expr(&args[1], casts, types, structs, variants, fn_names, def_names, type_names)
+                    lower_expr(
+                        &args[1], casts, types, structs, variants, fn_names, def_names, type_names
+                    )
                 )
             } else {
                 let rendered: Vec<String> = args
                     .iter()
-                    .map(|el| lower_expr(el, casts, types, structs, variants, fn_names, def_names, type_names))
+                    .map(|el| {
+                        lower_expr(
+                            el, casts, types, structs, variants, fn_names, def_names, type_names,
+                        )
+                    })
                     .collect();
-                let name = fn_names.get(op).cloned().unwrap_or_else(|| rust_value_name(op));
+                let name = fn_names
+                    .get(op)
+                    .cloned()
+                    .unwrap_or_else(|| rust_value_name(op));
                 format!("{}({})", name, rendered.join(", "))
+            }
+        }
+        Expr::Ascribe {
+            expr,
+            ann: _,
+            span: _,
+        } => {
+            // Type ascription is mostly for type checker. In Rust, we rely on inference or explicit let bindings.
+            // But we can wrap in a block? or just lower expr.
+            lower_expr(
+                expr, casts, types, structs, variants, fn_names, def_names, type_names,
+            )
+        }
+        Expr::Cast { expr, ann, span: _ } => {
+            let inner = lower_expr(
+                expr, casts, types, structs, variants, fn_names, def_names, type_names,
+            );
+            format!("({} as {})", inner, ty_rust(ann, type_names))
+        }
+        Expr::MethodCall {
+            base,
+            method,
+            args,
+            span: _,
+        } => {
+            let base_s = lower_expr(
+                base, casts, types, structs, variants, fn_names, def_names, type_names,
+            );
+            let args_s: Vec<String> = args
+                .iter()
+                .map(|a| {
+                    lower_expr(
+                        a, casts, types, structs, variants, fn_names, def_names, type_names,
+                    )
+                })
+                .collect();
+            format!("({}).{}({})", base_s, method, args_s.join(", "))
+        }
+        Expr::Set {
+            name,
+            expr,
+            span: _,
+        } => {
+            let val = lower_expr(
+                expr, casts, types, structs, variants, fn_names, def_names, type_names,
+            );
+            // Assuming 'name' refers to a mutable variable in scope
+            format!("{{ {} = {}; }}", name, val)
+        }
+        Expr::SetLit {
+            elems,
+            ann,
+            span: _,
+        } => {
+            let ty_str = if let Some(Ty::Set(inner)) = ann {
+                format!(
+                    "std::collections::HashSet::<{}>",
+                    ty_rust(inner, type_names)
+                )
+            } else {
+                "std::collections::HashSet".to_string()
+            };
+            if elems.is_empty() {
+                format!("{}::new()", ty_str)
+            } else {
+                let parts: Vec<String> = elems
+                    .iter()
+                    .map(|e| {
+                        lower_expr(
+                            e, casts, types, structs, variants, fn_names, def_names, type_names,
+                        )
+                    })
+                    .collect();
+                // Optimize for literal construction if possible, or use insert
+                let mut inserts = Vec::new();
+                for p in parts {
+                    inserts.push(format!("__s.insert({});", p));
+                }
+                format!(
+                    "{{ let mut __s = {}::new(); {} __s }}",
+                    ty_str,
+                    inserts.join(" ")
+                )
             }
         }
     };
@@ -835,9 +1074,19 @@ fn vec_scalar_binop(
 ) -> String {
     let vec_expr = if vec_on_left { left } else { right };
     let scalar_expr = if vec_on_left { right } else { left };
-    let vec_render = lower_expr(vec_expr, casts, types, structs, variants, fn_names, def_names, type_names);
-    let scalar_render =
-        lower_expr(scalar_expr, casts, types, structs, variants, fn_names, def_names, type_names);
+    let vec_render = lower_expr(
+        vec_expr, casts, types, structs, variants, fn_names, def_names, type_names,
+    );
+    let scalar_render = lower_expr(
+        scalar_expr,
+        casts,
+        types,
+        structs,
+        variants,
+        fn_names,
+        def_names,
+        type_names,
+    );
     let scalar = match scalar_ty {
         Ty::Named(_) => scalar_render,
         _ => scalar_render,
@@ -862,21 +1111,40 @@ fn lower_for_expr(
 ) -> String {
     match iter {
         crate::ast::Iterable::Range(range) => {
-            let start = lower_expr(&range.start, casts, types, structs, variants, fn_names, def_names, type_names);
-            let end = lower_expr(&range.end, casts, types, structs, variants, fn_names, def_names, type_names);
+            let start = lower_expr(
+                &range.start,
+                casts,
+                types,
+                structs,
+                variants,
+                fn_names,
+                def_names,
+                type_names,
+            );
+            let end = lower_expr(
+                &range.end, casts, types, structs, variants, fn_names, def_names, type_names,
+            );
             let ty = expr_ty(types, &range.start.span());
             let step = if let Some(step) = &range.step {
-                lower_expr(step, casts, types, structs, variants, fn_names, def_names, type_names)
+                lower_expr(
+                    step, casts, types, structs, variants, fn_names, def_names, type_names,
+                )
             } else {
                 default_step_for_ty(ty.as_ref(), type_names)
             };
             let mut_decl = if let Some(ty) = ty.as_ref() {
-                format!("let mut {}: {} = __start - __step;", var, ty_rust(ty, type_names))
+                format!(
+                    "let mut {}: {} = __start - __step;",
+                    var,
+                    ty_rust(ty, type_names)
+                )
             } else {
                 format!("let mut {} = __start - __step;", var)
             };
             let cmp = if range.inclusive { "<=" } else { "<" };
-            let body_render = lower_expr(body, casts, types, structs, variants, fn_names, def_names, type_names);
+            let body_render = lower_expr(
+                body, casts, types, structs, variants, fn_names, def_names, type_names,
+            );
             format!(
                 "{{ let __start = {start}; let __end = {end}; let __step = {step}; {mut_decl} loop {{ {var} = {var} + __step; if !({var} {cmp} __end) {{ break; }} {body_render}; }} }}",
                 start = start,
@@ -889,9 +1157,16 @@ fn lower_for_expr(
             )
         }
         crate::ast::Iterable::Expr(ex) => {
-            let vec_expr = lower_expr(ex, casts, types, structs, variants, fn_names, def_names, type_names);
-            let body_render = lower_expr(body, casts, types, structs, variants, fn_names, def_names, type_names);
-            format!("{{ for {} in ({}).into_iter() {{ {}; }} }}", var, vec_expr, body_render)
+            let vec_expr = lower_expr(
+                ex, casts, types, structs, variants, fn_names, def_names, type_names,
+            );
+            let body_render = lower_expr(
+                body, casts, types, structs, variants, fn_names, def_names, type_names,
+            );
+            format!(
+                "{{ for {} in ({}).into_iter() {{ {}; }} }}",
+                var, vec_expr, body_render
+            )
         }
     }
 }
@@ -983,7 +1258,21 @@ fn ty_rust(ty: &Ty, type_names: &BTreeMap<String, String>) -> String {
                 ty_rust(v, type_names)
             )
         }
-        Ty::Unknown => "_".to_string(),
+        Ty::Set(inner) => format!("std::collections::HashSet<{}>", ty_rust(inner, type_names)),
+        Ty::Generic(id) => format!("T{}", id),
+        Ty::Union(items) => {
+            let parts: Vec<String> = items.iter().map(|t| ty_rust(t, type_names)).collect();
+            // Union represenation in Rust? Assuming enum or just formatting for now if this is for codegen
+            // If it's for type string, maybe (A | B)
+            // But lower.rs suggests lowering to Rust code?
+            // "ty_to_rust_type" suggests generating Rust type name.
+            // Rust doesn't have anonymous unions.
+            // Maybe it expects a named type or `Box<dyn Any>`?
+            // For now, let's use a placeholder or error if it shouldn't happen here.
+            // But to fix compilation, I must return String.
+            format!("/* Union: {} */ Box<dyn Any>", parts.join(" | "))
+        }
+        Ty::Unknown => "/* unknown */".to_string(),
     }
 }
 

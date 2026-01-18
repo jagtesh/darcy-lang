@@ -11,6 +11,14 @@ fn hashmap_literal_lowers() {
 }
 
 #[test]
+fn hashmap_brace_literal_lowers() {
+    let src = "(defn main [] {:a 1 :b 2})";
+    let out = compile(src).expect("compile ok");
+    assert!(out.contains("HashMap"), "{}", out);
+    assert!(out.contains("insert"), "{}", out);
+}
+
+#[test]
 fn btreemap_literal_lowers() {
     let src = "(defn main [] (core.btreemap/new (\"a\" 1)))";
     let out = compile(src).expect("compile ok");

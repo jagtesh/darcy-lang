@@ -69,7 +69,8 @@
       "patterns": [
         {
           "name": "keyword.control.darcy",
-          "match": "\\\\b(?:range-incl|defstruct|defunion|continue|extern|defin|match|while|break|range|defn|loop|call|open|def|for|let|use|vec|if|do|fn)\\\\b"
+-          "match": "\\\\b(?:range-incl|defstruct|defunion|continue|extern|defin|match|while|break|range|defn|loop|call|open|def|for|let|use|vec|if|do|fn)\\\\b"
++          "match": "\\\\b(?:range-incl|defstruct|defrecord|defunion|continue|defenum|require|extern|defin|match|while|break|range|false|defn|case|loop|call|open|true|def|for|let|use|vec|nil|if|do|fn)\\\\b"
         }
       ]
     },

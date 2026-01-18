@@ -9,7 +9,7 @@ fn broadcasts_vector_scalar() {
 
 #[test]
 fn broadcasts_struct_field_access() {
-    let src = "(defstruct order (qty u32)) (defn qtys [os:vec<order>] os.qty)";
+    let src = "(defrecord order (qty u32)) (defn qtys [os:vec<order>] os.qty)";
     let out = compile(src).expect("compile ok");
     assert!(out.contains("map(|__x| __x.qty)"));
 }

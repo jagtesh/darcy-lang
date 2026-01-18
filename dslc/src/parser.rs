@@ -7,6 +7,7 @@ pub enum Sexp {
     Atom(TokKind, Span),
     List(Vec<Sexp>, Span),
     Brack(Vec<Sexp>, Span),
+    Brace(Vec<Sexp>, Span),
 }
 
 pub struct Parser {
@@ -58,7 +59,8 @@ impl Parser {
         match &t.kind {
             TokKind::LParen => self.parse_list(),
             TokKind::LBrack => self.parse_brack(),
-            TokKind::RParen | TokKind::RBrack => {
+            TokKind::LBrace => self.parse_brace(),
+            TokKind::RParen | TokKind::RBrack | TokKind::RBrace => {
                 Err(Diag::new("unexpected closing delimiter").with_span(t.span))
             }
             _ => {
@@ -104,5 +106,24 @@ impl Parser {
             }
         }
         Err(Diag::new("unclosed '['").with_span(open.span))
+    }
+
+    fn parse_brace(&mut self) -> DslResult<Sexp> {
+        let open = self.expect(TokKind::LBrace)?;
+        let mut items = Vec::new();
+        while let Some(t) = self.peek() {
+            match t.kind {
+                TokKind::RBrace => {
+                    let close = self.bump().unwrap();
+                    let span = Span {
+                        start: open.span.start,
+                        end: close.span.end,
+                    };
+                    return Ok(Sexp::Brace(items, span));
+                }
+                _ => items.push(self.parse_one()?),
+            }
+        }
+        Err(Diag::new("unclosed '{'").with_span(open.span))
     }
 }
