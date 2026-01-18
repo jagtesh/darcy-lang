@@ -103,7 +103,11 @@ impl ModuleLoader {
         }
 
         for (name, defs) in builtin_module_defs() {
-            self.defs.entry(name).or_insert(defs);
+            if let Some(existing) = self.defs.get_mut(&name) {
+                merge_defs(existing, defs);
+            } else {
+                self.defs.insert(name, defs);
+            }
         }
 
         let module_names: Vec<String> = self.modules.keys().cloned().collect();
@@ -190,6 +194,12 @@ fn collect_module_defs(tops: &[Top]) -> ModuleDefs {
         }
     }
     ModuleDefs { types, variants, fns }
+}
+
+fn merge_defs(dst: &mut ModuleDefs, src: ModuleDefs) {
+    dst.types.extend(src.types);
+    dst.variants.extend(src.variants);
+    dst.fns.extend(src.fns);
 }
 
 fn resolve_module(info: &ModuleInfo, all: &BTreeMap<String, ModuleDefs>) -> DslResult<Vec<Top>> {

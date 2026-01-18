@@ -83,3 +83,11 @@ fn std_io_dbg_builtin_module() {
     let out = compile_with_modules(&root.join("main.dsl"), src, &[]).expect("compile ok");
     assert!(out.contains("println!"));
 }
+
+#[test]
+fn open_core_fmt_print() {
+    let root = temp_root("core_fmt");
+    let src = "(open core.fmt) (defn main [] (print \"hi\"))";
+    let out = compile_with_modules(&root.join("main.dsl"), src, &[]).expect("compile ok");
+    assert!(out.contains("print!"), "{}", out);
+}
