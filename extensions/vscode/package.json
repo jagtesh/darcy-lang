@@ -1,13 +1,18 @@
 {
   "name": "darcy",
   "displayName": "Darcy",
-  "description": "Syntax highlighting for the Darcy language",
+  "description": "Syntax highlighting and language server support for Darcy",
   "version": "0.1.0",
   "publisher": "darcy-lang",
   "engines": {
     "vscode": "^1.80.0"
   },
   "categories": ["Programming Languages"],
+  "activationEvents": ["onLanguage:darcy"],
+  "main": "./extension.js",
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
   "contributes": {
     "languages": [
       {
