@@ -1,0 +1,28 @@
+{
+  "name": "darcy",
+  "displayName": "Darcy",
+  "description": "Syntax highlighting for the Darcy language",
+  "version": "0.1.0",
+  "publisher": "darcy-lang",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "darcy",
+        "aliases": ["Darcy", "darcy"],
+        "extensions": [".dsl"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "darcy",
+        "scopeName": "source.darcy",
+        "path": "./syntaxes/darcy.tmLanguage.json"
+      }
+    ]
+  }
+}

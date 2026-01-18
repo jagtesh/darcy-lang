@@ -1,0 +1,19 @@
+name = "Darcy"
+version = "0.1.0"
+schema_version = 1
+authors = ["darcy-lang"]
+description = "Syntax highlighting for the Darcy language"
+repository = ""
+
+[languages]
+[[languages]]
+name = "Darcy"
+scope = "source.darcy"
+file_extensions = ["dsl"]
+comment = { line = ";", block = { start = "#|", end = "|#" } }
+
+[grammars]
+[[grammars]]
+name = "Darcy"
+scope = "source.darcy"
+path = "darcy.tmLanguage.json"

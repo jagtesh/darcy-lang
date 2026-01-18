@@ -1,0 +1,101 @@
+{
+  "name": "Darcy",
+  "scopeName": "source.darcy",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#builtins"
+    },
+    {
+      "include": "#operators"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.semicolon.darcy",
+          "match": ";.*$"
+        },
+        {
+          "name": "comment.block.darcy",
+          "begin": "#\\|",
+          "end": "\\|#"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.darcy",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.darcy",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.darcy",
+          "match": "-?\\\\b\\\\d+\\\\.\\\\d+(?:[eE][+-]?\\\\d+)?\\\\b"
+        },
+        {
+          "name": "constant.numeric.integer.darcy",
+          "match": "-?\\\\b\\\\d+\\\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.darcy",
+          "match": "\\\\b(?:range-incl|defstruct|defunion|continue|extern|defin|match|while|break|range|defn|loop|call|open|def|for|let|use|vec|if|do|fn)\\\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.darcy",
+          "match": "\\\\b(?:string|usize|isize|bool|i32|i64|u32|u64|f32|f64|())\\\\b"
+        }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        {
+          "name": "support.function.builtin.darcy",
+          "match": "\\\\b(?:core.btreemap\\/is-empty|core.btreemap\\/contains|core.option\\/unwrap-or|core.result\\/unwrap-or|core.hashmap\\/is-empty|core.hashmap\\/contains|core.btreemap\\/insert|core.btreemap\\/remove|core.option\\/is-some|core.option\\/is-none|core.hashmap\\/insert|core.hashmap\\/remove|core.option\\/unwrap|core.result\\/is-err|core.result\\/unwrap|core.vec\\/is-empty|core.str\\/is-empty|core.result\\/is-ok|core.btreemap\\/new|core.btreemap\\/len|core.btreemap\\/get|core.fmt\\/println|core.option\\/some|core.option\\/none|core.hashmap\\/new|core.hashmap\\/len|core.hashmap\\/get|core.fmt\\/format|core.fmt\\/pretty|core.result\\/err|core.fmt\\/print|core.num\\/clamp|core.str\\/split|core.result\\/ok|core.str\\/trim|core.str\\/join|core.fmt\\/dbg|core.num\\/abs|core.num\\/min|core.num\\/max|core.vec\\/len|core.vec\\/get|core.vec\\/set|core.str\\/len|dbg)\\\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.darcy",
+          "match": "(?:\\/|+|-|*)"
+        }
+      ]
+    }
+  }
+}
