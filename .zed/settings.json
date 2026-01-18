@@ -1,0 +1,14 @@
+{
+  "language_servers": {
+    "darcy-lsp": {
+      "command": "darcy-lsp",
+      "args": []
+    }
+  },
+  "languages": [
+    {
+      "name": "Darcy",
+      "language_servers": ["darcy-lsp"]
+    }
+  ]
+}

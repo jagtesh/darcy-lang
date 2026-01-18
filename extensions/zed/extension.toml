@@ -1,19 +1,21 @@
+id = "darcy"
 name = "Darcy"
 version = "0.1.0"
 schema_version = 1
-authors = ["darcy-lang"]
 description = "Syntax highlighting for the Darcy language"
 repository = ""
+authors = ["darcy-lang"]
+themes = []
+icon_themes = []
+languages = ["languages/darcy"]
+capabilities = []
 
-[languages]
-[[languages]]
-name = "Darcy"
-scope = "source.darcy"
-file_extensions = ["dsl"]
-comment = { line = ";", block = { start = "#|", end = "|#" } }
+[lib]
 
-[grammars]
-[[grammars]]
-name = "Darcy"
-scope = "source.darcy"
-path = "darcy.tmLanguage.json"
+[grammars.scheme]
+repository = "https://github.com/6cdh/tree-sitter-scheme"
+rev = "2d5557fafe49a049485c8cb910be61ede309773a"
+
+[language_servers.darcy-lsp]
+language = "Darcy"
+languages = []
