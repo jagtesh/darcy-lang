@@ -13,10 +13,11 @@ What it supports (MVP):
   - binary ops: `+ - * /` in prefix form: `(* a b)`
   - unions + match: `(defunion name (variant (field Type) ...) ...)`, `(match x (variant (field v) expr) (_ expr))`
   - vectors: `[1 2 3]`, `(vec<i32> 1 2 3)`
-  - print: `(print expr)`
+  - debug print: `(dbg expr)`
+  - formatted print: `(core.fmt/print "x={}\n" x)`, `(core.fmt/println "x={}" x)`
   - extern wrapper: `(extern (defstruct ...))`, `(extern (defunion ...))`, `(extern (defn name [params] RetType))`
   - comments: `; line` and `#| block |#`
-  - modules: `(use "std/io")`, `(use "std/io" :as io)`, `(use "std/io" :only (print))`, `(open "std/io")`
+  - modules: `(use "std/io")`, `(use "std/io" :as io)`, `(use "std/io" :only (dbg))`, `(open "std/io")`
 
 What it does NOT support yet:
 - borrowing/ownership surface syntax
@@ -47,7 +48,7 @@ cargo run -p dslc -- --lib stdlib examples/ok.dsl
 (use "std/io" :as io)
 
 (defn main []
-  (io/print 42))
+  (io/dbg 42))
 ```
 
 ## Benchmark harness
@@ -93,7 +94,7 @@ cargo run -p dslc -- examples/missing_field.dsl
 
 ## Strategy examples (staged)
 
-- `examples/strategy_stage1.dsl` uses structs, unions, match, vectors, and print.
+- `examples/strategy_stage1.dsl` uses structs, unions, match, vectors, and dbg.
 - `examples/strategy_stage2.dsl` introduces extern types/functions and regime logic.
 - `examples/strategy_stage3.dsl` sketches multi-asset portfolio logic with broadcasting.
 

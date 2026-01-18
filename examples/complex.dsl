@@ -8,4 +8,4 @@
   (* os.price 2.0))
 
 (defn main []
-  (print (total-prices [(order 1 2 3.5) (order 2 4 1.25) (order 3 1 9.0)])))
+  (dbg (total-prices [(order 1 2 3.5) (order 2 4 1.25) (order 3 1 9.0)])))

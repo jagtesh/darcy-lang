@@ -353,7 +353,7 @@ fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
         variants: BTreeSet::new(),
         fns: BTreeSet::new(),
     };
-    std_io.fns.insert("print".to_string());
+    std_io.fns.insert("dbg".to_string());
     out.insert("std.io".to_string(), std_io);
 
     let mut core_num = ModuleDefs {
@@ -387,6 +387,18 @@ fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
     core_str.fns.insert("split".to_string());
     core_str.fns.insert("join".to_string());
     out.insert("core.str".to_string(), core_str);
+
+    let mut core_fmt = ModuleDefs {
+        types: BTreeSet::new(),
+        variants: BTreeSet::new(),
+        fns: BTreeSet::new(),
+    };
+    core_fmt.fns.insert("dbg".to_string());
+    core_fmt.fns.insert("format".to_string());
+    core_fmt.fns.insert("pretty".to_string());
+    core_fmt.fns.insert("print".to_string());
+    core_fmt.fns.insert("println".to_string());
+    out.insert("core.fmt".to_string(), core_fmt);
 
     let mut core_option = ModuleDefs {
         types: BTreeSet::new(),
@@ -574,7 +586,7 @@ fn split_qualified(name: &str) -> Option<(&str, &str)> {
 }
 
 fn is_builtin_op(name: &str) -> bool {
-    matches!(name, "+" | "-" | "*" | "/" | "print")
+    matches!(name, "+" | "-" | "*" | "/" | "dbg")
 }
 
 fn normalize_module_prefix(prefix: &str) -> String {

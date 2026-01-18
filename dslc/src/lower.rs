@@ -256,11 +256,41 @@ fn lower_expr(
             rendered
         }
         Expr::Call { op, args, span } => {
-            if (op == "print" || op == "std.io/print") && args.len() == 1 {
+            if (op == "dbg" || op == "std.io/dbg" || op == "core.fmt/dbg") && args.len() == 1 {
                 return format!(
                     "println!(\"{{:?}}\", {})",
                     lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
                 );
+            }
+            if op == "core.fmt/format" && args.len() == 1 {
+                return format!(
+                    "format!(\"{{:?}}\", {})",
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if op == "core.fmt/pretty" && args.len() == 1 {
+                return format!(
+                    "format!(\"{{:#?}}\", {})",
+                    lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if (op == "core.fmt/print" || op == "core.fmt/println") && !args.is_empty() {
+                let macro_name = if op == "core.fmt/print" {
+                    "print"
+                } else {
+                    "println"
+                };
+                if let Expr::Str(s, _) = &args[0] {
+                    let fmt = format!("{:?}", s);
+                    if args.len() == 1 {
+                        return format!("{}!({})", macro_name, fmt);
+                    }
+                    let rendered: Vec<String> = args[1..]
+                        .iter()
+                        .map(|el| lower_expr(el, casts, types, structs, variants, fn_names, type_names))
+                        .collect();
+                    return format!("{}!({}, {})", macro_name, fmt, rendered.join(", "));
+                }
             }
             if op == "core.hashmap/new" || op == "core.btreemap/new" {
                 let map_ty = if op == "core.hashmap/new" {

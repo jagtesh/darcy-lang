@@ -10,4 +10,4 @@
     (point 0.0)))
 
 (defn main []
-  (print (area (circle 3.0))))
+  (dbg (area (circle 3.0))))

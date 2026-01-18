@@ -11,11 +11,11 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 ## Lexical Rules
 
 - **Identifiers**: lowercase kebab-case (e.g. `total-prices`, `order-book`).
-- **Qualified names**: `module/name` (module prefix + item). Module prefixes can contain dot segments, e.g. `std.io/print`.
+- **Qualified names**: `module/name` (module prefix + item). Module prefixes can contain dot segments, e.g. `std.io/dbg`.
 - **Comments**:
   - Line: `; comment`
   - Block: `#| comment |#`
-- **Strings**: double-quoted, e.g. `"hello"`.
+- **Strings**: double-quoted, e.g. `"hello"`. Escapes: `\\`, `\"`, `\n`, `\t`, `\r`.
 - **Reserved keywords** (cannot be used as identifiers): `defn`, `defstruct`, `defunion`, `extern`, `match`, `use`, `open`, `vec`.
 
 ## Literals
@@ -154,7 +154,7 @@ Module search paths are:
 ```
 (use "std/io")
 (use "std/io" :as io)
-(use "std/io" :only (print read))
+(use "std/io" :only (dbg read))
 (open "std/io")
 ```
 
@@ -163,15 +163,16 @@ Module search paths are:
 - `:only` imports named items into the current namespace.
 - `open` imports everything into the current namespace.
 - Use qualified call heads for direct module access:
-  - `(std.io/print 1)`
-  - `(io/print 1)`
+  - `(std.io/dbg 1)`
+  - `(io/dbg 1)`
 
 ### Built-in Modules (MVP)
 
-- `std/io`: `print`
+- `std/io`: `dbg`
 - `core/num`: `abs`, `min`, `max`, `clamp`
 - `core/vec`: `len`, `is-empty`
 - `core/str`: `len`, `is-empty`, `trim`, `split`, `join`
+- `core/fmt`: `dbg`, `format`, `pretty`, `print`, `println`
 - `core/option`: `some`, `none`, `is-some`, `is-none`, `unwrap`, `unwrap-or`
 - `core/result`: `ok`, `err`, `is-ok`, `is-err`, `unwrap`, `unwrap-or`
 - `core/hashmap`: `new`, `len`, `is-empty`, `get`, `contains`, `insert`, `remove`
@@ -198,7 +199,7 @@ The current system is monomorphic and unification-based (HM-style without genera
 ## Builtins
 
 - Numeric operators: `+ - * /`
-- `print` is currently a builtin returning `()`.
+- `dbg` is currently a builtin returning `()`.
 
 ## Program Entry
 
@@ -206,7 +207,7 @@ The current system is monomorphic and unification-based (HM-style without genera
 
 ```
 (defn main []
-  (print 42))
+  (dbg 42))
 ```
 
 ## Example
@@ -218,7 +219,7 @@ The current system is monomorphic and unification-based (HM-style without genera
   (* o.qty o.price))
 
 (defn main []
-  (print (total (order 2 3.5))))
+  (dbg (total (order 2 3.5))))
 ```
 
 ## Current Limitations
@@ -226,7 +227,7 @@ The current system is monomorphic and unification-based (HM-style without genera
 - No user-defined generics or traits.
 - No macros.
 - Borrowing/ownership modeled only via Rust lowering.
-- `print` is still a builtin (planned to move to std).
+- `dbg` is still a builtin (planned to move to std).
 
 ## Roadmap Notes
 

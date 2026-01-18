@@ -911,10 +911,54 @@ fn infer_expr_type(
             }
 
             match op.as_str() {
-                "print" | "std.io/print" => {
+                "dbg" | "std.io/dbg" => {
                     if targs.len() != 1 {
-                        return Err(Diag::new("'print' expects 1 argument").with_span(span.clone()));
+                        return Err(Diag::new("'dbg' expects 1 argument").with_span(span.clone()));
                     }
+                    let out_ty = InferTy::Named("()".to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.fmt/dbg" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("'dbg' expects 1 argument").with_span(span.clone()));
+                    }
+                    let out_ty = InferTy::Named("()".to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.fmt/format" | "core.fmt/pretty" => {
+                    if targs.len() != 1 {
+                        return Err(
+                            Diag::new("format/pretty expects 1 argument").with_span(span.clone())
+                        );
+                    }
+                    let out_ty = InferTy::Named("string".to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.fmt/print" | "core.fmt/println" => {
+                    if targs.is_empty() {
+                        return Err(
+                            Diag::new("print/println expects a format string").with_span(span.clone())
+                        );
+                    }
+                    ensure_fmt_string(&targs[0].expr, &targs[0].ty, &args[0].span())?;
                     let out_ty = InferTy::Named("()".to_string());
                     types.insert(SpanKey::new(span), out_ty.clone());
                     Ok(InferExpr {
@@ -1417,6 +1461,18 @@ fn infer_expr_type(
                 _ => Err(Diag::new(format!("unknown operator '{}'", op)).with_span(span.clone())),
             }
         }
+    }
+}
+
+fn ensure_fmt_string(expr: &Expr, ty: &InferTy, span: &Span) -> DslResult<()> {
+    match expr {
+        Expr::Str(_, _) => Ok(()),
+        _ => match ty {
+            InferTy::Named(n) if n == "string" => Err(
+                Diag::new("format string must be a string literal").with_span(span.clone()),
+            ),
+            _ => Err(Diag::new("format string must be a string literal").with_span(span.clone())),
+        },
     }
 }
 

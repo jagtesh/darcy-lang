@@ -396,7 +396,7 @@ fn ensure_lisp_ident(name: &str, span: &Span, kind: &str) -> DslResult<String> {
 }
 
 fn is_builtin_op(name: &str) -> bool {
-    matches!(name, "+" | "-" | "*" | "/" | "print")
+    matches!(name, "+" | "-" | "*" | "/" | "dbg")
 }
 
 fn is_reserved_ident(name: &str) -> bool {

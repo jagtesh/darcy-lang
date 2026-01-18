@@ -123,6 +123,35 @@ pub fn lex(input: &str) -> DslResult<Vec<Tok>> {
                         closed = true;
                         break;
                     }
+                    if ch == '\\' {
+                        if i + 1 >= bytes.len() {
+                            return Err(
+                                Diag::new("unterminated string escape").with_span(Span {
+                                    start,
+                                    end: Loc { line, col, byte: i },
+                                }),
+                            );
+                        }
+                        let next = input[i + 1..].chars().next().unwrap();
+                        match next {
+                            'n' => s.push('\n'),
+                            't' => s.push('\t'),
+                            'r' => s.push('\r'),
+                            '\\' => s.push('\\'),
+                            '"' => s.push('"'),
+                            _ => {
+                                return Err(
+                                    Diag::new("unknown string escape").with_span(Span {
+                                        start,
+                                        end: Loc { line, col, byte: i + 2 },
+                                    }),
+                                )
+                            }
+                        }
+                        i += 2;
+                        col += 2;
+                        continue;
+                    }
                     if ch == '\n' {
                         return Err(
                             Diag::new("unterminated string literal").with_span(Span {

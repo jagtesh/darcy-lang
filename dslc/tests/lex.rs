@@ -22,3 +22,18 @@ fn lexes_basic_form() {
     ];
     assert_eq!(kinds, expected);
 }
+
+#[test]
+fn lexes_string_escapes() {
+    let src = "(dbg \"a\\n\\t\\\"b\\\\\")";
+    let toks = lex(src).expect("lex ok");
+    let mut found = false;
+    for t in toks {
+        if let TokKind::Str(s) = t.kind {
+            assert_eq!(s, "a\n\t\"b\\");
+            found = true;
+            break;
+        }
+    }
+    assert!(found, "expected string token");
+}

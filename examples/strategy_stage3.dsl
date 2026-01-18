@@ -17,4 +17,4 @@
   ps.weight)
 
 (defn main []
-  (print (apply-bias (risk-on) (weights [(position 1 0.4) (position 2 0.6)]))))
+  (dbg (apply-bias (risk-on) (weights [(position 1 0.4) (position 2 0.6)]))))

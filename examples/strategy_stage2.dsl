@@ -21,4 +21,4 @@
     (sideways returns)))
 
 (defn main []
-  (print (risk-adjust (regime-of [0.01 0.02 -0.01]) (sma [0.01 0.02 -0.01] 2))))
+  (dbg (risk-adjust (regime-of [0.01 0.02 -0.01]) (sma [0.01 0.02 -0.01] 2))))

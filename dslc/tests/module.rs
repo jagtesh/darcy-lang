@@ -77,9 +77,9 @@ fn dotted_module_prefix() {
 }
 
 #[test]
-fn std_io_print_builtin_module() {
+fn std_io_dbg_builtin_module() {
     let root = temp_root("std_io");
-    let src = "(use \"std/io\") (defn main [] (std.io/print 1))";
+    let src = "(use \"std/io\") (defn main [] (std.io/dbg 1))";
     let out = compile_with_modules(&root.join("main.dsl"), src, &[]).expect("compile ok");
     assert!(out.contains("println!"));
 }

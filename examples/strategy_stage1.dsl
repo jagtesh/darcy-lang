@@ -1,4 +1,4 @@
-; Stage 1: core DSL features (structs, unions, match, vectors, print)
+; Stage 1: core DSL features (structs, unions, match, vectors, dbg)
 
 (defstruct candle
   (close f64)
@@ -19,7 +19,7 @@
   cs.close)
 
 (defn main []
-  (print (decision (buy 0.7))))
+  (dbg (decision (buy 0.7))))
 
 (defn demo-closes []
-  (print (closes [(candle 101.25 1200.0) (candle 99.75 980.0)])))
+  (dbg (closes [(candle 101.25 1200.0) (candle 99.75 980.0)])))
