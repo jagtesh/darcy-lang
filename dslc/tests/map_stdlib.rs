@@ -34,7 +34,7 @@ fn hashmap_empty_with_annotation() {
 #[test]
 fn hashmap_alias_new_lowers() {
     let root = PathBuf::from("main.dsl");
-    let src = "(use \"core/hashmap\" :as hm) (defn main [] (hm/new (\"a\" 1)))";
+    let src = "(use core.hashmap :as hm) (defn main [] (hm/new (\"a\" 1)))";
     let out = compile_with_modules(&root, src, &[]).expect("compile ok");
     assert!(out.contains("HashMap"), "{}", out);
 }

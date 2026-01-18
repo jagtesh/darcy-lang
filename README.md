@@ -17,7 +17,7 @@ What it supports (MVP):
   - formatted print: `(core.fmt/print "x={}\n" x)`, `(core.fmt/println "x={}" x)`
   - extern wrapper: `(extern (defstruct ...))`, `(extern (defunion ...))`, `(extern (defn name [params] RetType))`
   - comments: `; line` and `#| block |#`
-  - modules: `(use "std/io")`, `(use "std/io" :as io)`, `(use "std/io" :only (dbg))`, `(open "std/io")`
+  - modules: `(use std.io)`, `(use std.io :as io)`, `(use std.io :only (dbg))`, `(open std.io)`
 
 What it does NOT support yet:
 - borrowing/ownership surface syntax
@@ -45,7 +45,7 @@ cargo run -p dslc -- --lib stdlib examples/ok.dsl
 ## Modules quickstart
 
 ```lisp
-(use "std/io" :as io)
+(use std.io :as io)
 
 (defn main []
   (io/dbg 42))

@@ -129,7 +129,7 @@ impl ModuleLoader {
     }
 
     fn find_module_path(&self, import: &str) -> DslResult<PathBuf> {
-        let rel = format!("{}.dsl", import);
+        let rel = format!("{}.dsl", import.replace('.', "/"));
         for root in &self.lib_paths {
             let candidate = root.join(&rel);
             if candidate.exists() {
@@ -466,9 +466,11 @@ fn module_name_from_import(path: &str) -> DslResult<String> {
         return Err(Diag::new("empty module path"));
     }
     if !is_module_path(path) {
-        return Err(Diag::new("module path must be lowercase and use lisp-style segments"));
+        return Err(Diag::new(
+            "module path must be lowercase and use lisp-style segments separated by '.'",
+        ));
     }
-    Ok(path.replace('/', "."))
+    Ok(path.to_string())
 }
 
 fn module_name_from_path(path: &Path) -> DslResult<String> {
@@ -597,7 +599,7 @@ fn is_module_path(path: &str) -> bool {
     if path.is_empty() {
         return false;
     }
-    for seg in path.split('/') {
+    for seg in path.split('.') {
         if seg.is_empty() || !is_lisp_ident(seg) {
             return false;
         }

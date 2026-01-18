@@ -133,15 +133,17 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 
 ## Modules and Imports
 
-Modules are files addressed by path strings and brought into scope with `use` or `open`.
+Modules are files addressed by dot-separated symbols and brought into scope with `use` or `open`.
 
 ### Module Paths
 
 - File `std/io.dsl` is imported as:
 
 ```
-(use "std/io")
+(use std.io)
 ```
+
+Dots map to directories (`std.io` -> `std/io.dsl`).
 
 Module search paths are:
 
@@ -152,10 +154,10 @@ Module search paths are:
 ### Import Forms
 
 ```
-(use "std/io")
-(use "std/io" :as io)
-(use "std/io" :only (dbg read))
-(open "std/io")
+(use std.io)
+(use std.io :as io)
+(use std.io :only (dbg read))
+(open std.io)
 ```
 
 - `use` keeps names under their module unless `:only` is used.
@@ -168,15 +170,15 @@ Module search paths are:
 
 ### Built-in Modules (MVP)
 
-- `std/io`: `dbg`
-- `core/num`: `abs`, `min`, `max`, `clamp`
-- `core/vec`: `len`, `is-empty`
-- `core/str`: `len`, `is-empty`, `trim`, `split`, `join`
-- `core/fmt`: `dbg`, `format`, `pretty`, `print`, `println`
-- `core/option`: `some`, `none`, `is-some`, `is-none`, `unwrap`, `unwrap-or`
-- `core/result`: `ok`, `err`, `is-ok`, `is-err`, `unwrap`, `unwrap-or`
-- `core/hashmap`: `new`, `len`, `is-empty`, `get`, `contains`, `insert`, `remove`
-- `core/btreemap`: `new`, `len`, `is-empty`, `get`, `contains`, `insert`, `remove`
+- `std.io`: `dbg`
+- `core.num`: `abs`, `min`, `max`, `clamp`
+- `core.vec`: `len`, `is-empty`
+- `core.str`: `len`, `is-empty`, `trim`, `split`, `join`
+- `core.fmt`: `dbg`, `format`, `pretty`, `print`, `println`
+- `core.option`: `some`, `none`, `is-some`, `is-none`, `unwrap`, `unwrap-or`
+- `core.result`: `ok`, `err`, `is-ok`, `is-err`, `unwrap`, `unwrap-or`
+- `core.hashmap`: `new`, `len`, `is-empty`, `get`, `contains`, `insert`, `remove`
+- `core.btreemap`: `new`, `len`, `is-empty`, `get`, `contains`, `insert`, `remove`
 
 ### Resolution Rules
 

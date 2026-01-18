@@ -1006,11 +1006,11 @@ pub fn parse_toplevel(sexps: &[Sexp]) -> DslResult<Vec<Top>> {
 
 pub fn parse_use_decl(items: &[Sexp], span: &Span, open: bool) -> DslResult<UseDecl> {
     if items.is_empty() {
-        return Err(Diag::new("use form is (use \"path\" [:as name] [:only (a b)])").with_span(span.clone()));
+        return Err(Diag::new("use form is (use path [:as name] [:only (a b)])").with_span(span.clone()));
     }
     let (path, path_sp) = match &items[0] {
-        Sexp::Atom(TokKind::Str(s), sp) => (s.clone(), sp.clone()),
-        _ => return Err(Diag::new("use path must be a string").with_span(span.clone())),
+        Sexp::Atom(TokKind::Sym(s), sp) => (s.clone(), sp.clone()),
+        _ => return Err(Diag::new("use path must be a symbol").with_span(span.clone())),
     };
     let mut alias = None;
     let mut only = None;
