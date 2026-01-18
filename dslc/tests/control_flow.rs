@@ -36,3 +36,11 @@ fn lowers_for_range_incl() {
     let out = compile(src).expect("compile ok");
     assert!(out.contains("<="), "{}", out);
 }
+
+#[test]
+fn lowers_do_sequence() {
+    let src = "(defn main [] (do (dbg 1) (dbg 2)))";
+    let out = compile(src).expect("compile ok");
+    assert!(out.contains("println!(\"{:?}\", 1i32);"), "{}", out);
+    assert!(out.contains("println!(\"{:?}\", 2i32)"), "{}", out);
+}

@@ -164,6 +164,18 @@ fn lower_expr(
                 format!("if {} {{ {} }} else {{ () }}", cond, then_br)
             }
         }
+        Expr::Do { exprs, .. } => {
+            let mut parts = Vec::new();
+            for (idx, ex) in exprs.iter().enumerate() {
+                let rendered = lower_expr(ex, casts, types, structs, variants, fn_names, type_names);
+                if idx + 1 == exprs.len() {
+                    parts.push(rendered);
+                } else {
+                    parts.push(format!("{};", rendered));
+                }
+            }
+            format!("{{ {} }}", parts.join(" "))
+        }
         Expr::Loop { body, .. } => {
             let body = lower_expr(body, casts, types, structs, variants, fn_names, type_names);
             format!("loop {{ {}; }}", body)

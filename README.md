@@ -9,6 +9,7 @@ What it supports (MVP):
 - Expressions:
   - numeric literals (ints default to i32, floats to f64)
   - if: `(if cond then [else])`
+  - sequencing: `(do expr1 expr2 ... exprN)`
   - loops: `(loop expr)`, `(while cond expr)`, `(for i (range 0 10) expr)`
   - loop control: `(break [expr])`, `(continue)`
   - variables

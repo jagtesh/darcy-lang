@@ -303,6 +303,16 @@ fn resolve_expr(res: &Resolver, e: &Expr) -> DslResult<Expr> {
             },
             span: span.clone(),
         }),
+        Expr::Do { exprs, span } => {
+            let mut out = Vec::new();
+            for e in exprs {
+                out.push(resolve_expr(res, e)?);
+            }
+            Ok(Expr::Do {
+                exprs: out,
+                span: span.clone(),
+            })
+        }
         Expr::Loop { body, span } => Ok(Expr::Loop {
             body: Box::new(resolve_expr(res, body)?),
             span: span.clone(),
@@ -457,6 +467,10 @@ fn inline_subst(expr: &Expr, map: &BTreeMap<String, Expr>) -> Expr {
         Expr::Pair { key, val, span } => Expr::Pair {
             key: Box::new(inline_subst(key, map)),
             val: Box::new(inline_subst(val, map)),
+            span: span.clone(),
+        },
+        Expr::Do { exprs, span } => Expr::Do {
+            exprs: exprs.iter().map(|e| inline_subst(e, map)).collect(),
             span: span.clone(),
         },
         Expr::If { cond, then_br, else_br, span } => Expr::If {

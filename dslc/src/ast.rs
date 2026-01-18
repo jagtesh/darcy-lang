@@ -95,6 +95,10 @@ pub enum Expr {
         val: Box<Expr>,
         span: Span,
     },
+    Do {
+        exprs: Vec<Expr>,
+        span: Span,
+    },
     If {
         cond: Box<Expr>,
         then_br: Box<Expr>,
@@ -155,6 +159,7 @@ impl Expr {
             Expr::Var(_, s) => s.clone(),
             Expr::VecLit { span, .. } => span.clone(),
             Expr::Pair { span, .. } => span.clone(),
+            Expr::Do { span, .. } => span.clone(),
             Expr::If { span, .. } => span.clone(),
             Expr::Loop { span, .. } => span.clone(),
             Expr::While { span, .. } => span.clone(),
@@ -457,6 +462,7 @@ fn is_reserved_ident(name: &str) -> bool {
             | "extern"
             | "match"
             | "if"
+            | "do"
             | "loop"
             | "while"
             | "for"
@@ -851,6 +857,19 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
             }
             if op == "match" {
                 return parse_match(span, &items[1..]);
+            }
+            if op == "do" {
+                if items.len() < 2 {
+                    return Err(Diag::new("do form is (do expr ...)").with_span(op_span));
+                }
+                let mut exprs = Vec::new();
+                for item in items.iter().skip(1) {
+                    exprs.push(parse_expr(item)?);
+                }
+                return Ok(Expr::Do {
+                    exprs,
+                    span: span.clone(),
+                });
             }
             let head_ty = parse_type_from_sym(&op);
             if let Ty::Vec(_) = head_ty {

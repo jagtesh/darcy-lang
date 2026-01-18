@@ -84,6 +84,7 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 
 ```
 (if cond then-expr [else-expr])
+(do expr1 expr2 ... exprN)
 (loop expr)
 (while cond expr)
 (for i (range 0 10) expr)
@@ -92,6 +93,7 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 ```
 
 - `if` without `else` returns `()`.
+- `do` evaluates each expression in order and returns the last value.
 - `loop`, `while`, and `for` are expressions and can `break` with a value.
 - Loop bodies are single expressions (no implicit blocks yet).
 

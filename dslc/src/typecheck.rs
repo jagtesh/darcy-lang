@@ -379,6 +379,16 @@ fn expand_inline_calls(
             },
             span: span.clone(),
         }),
+        Expr::Do { exprs, span } => {
+            let mut out = Vec::new();
+            for ex in exprs {
+                out.push(expand_inline_calls(ex, inline_defs)?);
+            }
+            Ok(Expr::Do {
+                exprs: out,
+                span: span.clone(),
+            })
+        }
         Expr::Loop { body, span } => Ok(Expr::Loop {
             body: Box::new(expand_inline_calls(body, inline_defs)?),
             span: span.clone(),
@@ -468,6 +478,10 @@ fn inline_subst_local(expr: &Expr, map: &BTreeMap<String, Expr>) -> Expr {
         Expr::Pair { key, val, span } => Expr::Pair {
             key: Box::new(inline_subst_local(key, map)),
             val: Box::new(inline_subst_local(val, map)),
+            span: span.clone(),
+        },
+        Expr::Do { exprs, span } => Expr::Do {
+            exprs: exprs.iter().map(|e| inline_subst_local(e, map)).collect(),
             span: span.clone(),
         },
         Expr::If { cond, then_br, else_br, span } => Expr::If {
@@ -907,6 +921,24 @@ fn infer_expr_type_internal(
             Ok(InferExpr {
                 expr: e.clone(),
                 ty,
+                casts,
+                types,
+            })
+        }
+        Expr::Do { exprs, span } => {
+            let mut casts = Vec::new();
+            let mut types = BTreeMap::new();
+            let mut last_ty = InferTy::Named("()".to_string());
+            for ex in exprs {
+                let te = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, ex)?;
+                casts.extend(te.casts.clone());
+                types.extend(te.types.clone());
+                last_ty = te.ty;
+            }
+            types.insert(SpanKey::new(span), last_ty.clone());
+            Ok(InferExpr {
+                expr: e.clone(),
+                ty: last_ty,
                 casts,
                 types,
             })
