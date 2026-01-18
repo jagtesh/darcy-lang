@@ -54,3 +54,14 @@ fn rejects_continue_outside_loop() {
         err.message
     );
 }
+
+#[test]
+fn rejects_shadowing_def_name() {
+    let src = "(def val 1) (defn main [val] val)";
+    let err = compile(src).expect_err("expected shadowing error");
+    assert!(
+        err.message.contains("shadows a def name"),
+        "unexpected error: {}",
+        err.message
+    );
+}

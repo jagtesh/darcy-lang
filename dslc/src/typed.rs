@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::ast::{Expr, FnDef, Ty};
+use crate::ast::{Def, Expr, FnDef, Ty};
 use crate::diag::Span;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -36,5 +36,11 @@ pub struct TypedExpr {
 pub struct TypedFn {
     pub def: FnDef,
     pub param_tys: BTreeMap<String, Ty>,
+    pub body: TypedExpr,
+}
+
+#[derive(Debug, Clone)]
+pub struct TypedDef {
+    pub def: Def,
     pub body: TypedExpr,
 }

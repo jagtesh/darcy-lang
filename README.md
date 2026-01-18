@@ -5,11 +5,14 @@ This is a tiny proof-of-concept "Elm-ish typed Lisp" frontend that lowers to Rus
 What it supports (MVP):
  - `(defstruct name (field type) ...)`
  - `(defn name [params] expr)`
+ - `(def name expr)`
    - params are symbols like `o:order` (type annotation required unless inference is unambiguous)
 - Expressions:
   - numeric literals (ints default to i32, floats to f64)
   - if: `(if cond then [else])`
   - sequencing: `(do expr1 expr2 ... exprN)`
+  - local bindings: `(let [x 1 y 2] expr)`
+  - closures: `(fn [x] expr)` and `(call f arg ...)`
   - loops: `(loop expr)`, `(while cond expr)`, `(for i (range 0 10) expr)`
   - loop control: `(break [expr])`, `(continue)`
   - variables
@@ -28,8 +31,7 @@ What it supports (MVP):
 What it does NOT support yet:
 - borrowing/ownership surface syntax
 - generics / traits
-- function calls beyond numeric ops
-- pattern matching
+- closures as return types
 - macros
 - helpful multi-span diagnostics (only 1 span)
 

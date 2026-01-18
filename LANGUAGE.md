@@ -16,7 +16,7 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
   - Line: `; comment`
   - Block: `#| comment |#`
 - **Strings**: double-quoted, e.g. `"hello"`. Escapes: `\\`, `\"`, `\n`, `\t`, `\r`.
-- **Reserved keywords** (cannot be used as identifiers): `defn`, `defin`, `defstruct`, `defunion`, `extern`, `match`, `if`, `loop`, `while`, `for`, `break`, `continue`, `use`, `open`, `vec`, `range`, `range-incl`.
+- **Reserved keywords** (cannot be used as identifiers): `def`, `defn`, `defin`, `defstruct`, `defunion`, `extern`, `match`, `if`, `do`, `loop`, `while`, `for`, `break`, `continue`, `let`, `fn`, `call`, `use`, `open`, `vec`, `range`, `range-incl`.
 
 ## Literals
 
@@ -70,6 +70,15 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 - Parameters are symbols, optionally annotated: `x:i32`.
 - Parameter types are inferred when possible; otherwise they must be annotated.
 
+### Definitions (global values)
+
+```
+(def base 10)
+```
+
+- `def` creates an immutable, lazily initialized global value.
+- Global `def` names cannot be shadowed by `let`, `fn` parameters, or `defn` parameters.
+
 ### Inline (displaced closures)
 
 ```
@@ -79,6 +88,17 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 
 - Inlines are expanded at the call site.
 - Free variables are resolved in the caller scope.
+
+### Lambdas and Local Bindings
+
+```
+(let [x 1 y 2]
+  (call (fn [z] (+ z x)) y))
+```
+
+- `let` binds local variables and evaluates the body expression.
+- Bindings can be written as pairs: `[(x 1) (y 2)]` or flat pairs: `[x 1 y 2]`.
+- `fn` creates a closure; `call` invokes a value as a function.
 
 ### Control Flow
 

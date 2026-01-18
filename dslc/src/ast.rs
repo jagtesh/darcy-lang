@@ -95,6 +95,21 @@ pub enum Expr {
         val: Box<Expr>,
         span: Span,
     },
+    Let {
+        bindings: Vec<LetBinding>,
+        body: Box<Expr>,
+        span: Span,
+    },
+    Lambda {
+        params: Vec<Param>,
+        body: Box<Expr>,
+        span: Span,
+    },
+    CallDyn {
+        func: Box<Expr>,
+        args: Vec<Expr>,
+        span: Span,
+    },
     Do {
         exprs: Vec<Expr>,
         span: Span,
@@ -159,6 +174,9 @@ impl Expr {
             Expr::Var(_, s) => s.clone(),
             Expr::VecLit { span, .. } => span.clone(),
             Expr::Pair { span, .. } => span.clone(),
+            Expr::Let { span, .. } => span.clone(),
+            Expr::Lambda { span, .. } => span.clone(),
+            Expr::CallDyn { span, .. } => span.clone(),
             Expr::Do { span, .. } => span.clone(),
             Expr::If { span, .. } => span.clone(),
             Expr::Loop { span, .. } => span.clone(),
@@ -204,11 +222,30 @@ pub struct InlineDef {
 }
 
 #[derive(Debug, Clone)]
+pub struct Def {
+    pub name: String,
+    pub rust_name: String,
+    pub ann: Option<Ty>,
+    pub expr: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct LetBinding {
+    pub name: String,
+    pub rust_name: String,
+    pub ann: Option<Ty>,
+    pub expr: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
 pub enum Top {
     Struct(StructDef),
     Union(UnionDef),
     Func(FnDef),
     Inline(InlineDef),
+    Def(Def),
     Use(UseDecl),
 }
 
@@ -455,7 +492,8 @@ fn is_builtin_op(name: &str) -> bool {
 fn is_reserved_ident(name: &str) -> bool {
     matches!(
         name,
-        "defn"
+        "def"
+            | "defn"
             | "defin"
             | "defstruct"
             | "defunion"
@@ -468,6 +506,9 @@ fn is_reserved_ident(name: &str) -> bool {
             | "for"
             | "break"
             | "continue"
+            | "let"
+            | "fn"
+            | "call"
             | "use"
             | "open"
             | "vec"
@@ -858,6 +899,45 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
             if op == "match" {
                 return parse_match(span, &items[1..]);
             }
+            if op == "let" {
+                if items.len() != 3 {
+                    return Err(Diag::new("let form is (let [bindings] body)").with_span(op_span));
+                }
+                let bindings = parse_let_bindings(&items[1])?;
+                let body = parse_expr(&items[2])?;
+                return Ok(Expr::Let {
+                    bindings,
+                    body: Box::new(body),
+                    span: span.clone(),
+                });
+            }
+            if op == "fn" {
+                if items.len() != 3 {
+                    return Err(Diag::new("fn form is (fn [params] body)").with_span(op_span));
+                }
+                let params = parse_params(&items[1])?;
+                let body = parse_expr(&items[2])?;
+                return Ok(Expr::Lambda {
+                    params,
+                    body: Box::new(body),
+                    span: span.clone(),
+                });
+            }
+            if op == "call" {
+                if items.len() < 2 {
+                    return Err(Diag::new("call form is (call f arg ...)").with_span(op_span));
+                }
+                let func = parse_expr(&items[1])?;
+                let mut args = Vec::new();
+                for item in items.iter().skip(2) {
+                    args.push(parse_expr(item)?);
+                }
+                return Ok(Expr::CallDyn {
+                    func: Box::new(func),
+                    args,
+                    span: span.clone(),
+                });
+            }
             if op == "do" {
                 if items.len() < 2 {
                     return Err(Diag::new("do form is (do expr ...)").with_span(op_span));
@@ -953,6 +1033,67 @@ fn parse_range_expr(se: &Sexp) -> DslResult<RangeExpr> {
         inclusive,
         span: span.clone(),
     })
+}
+
+fn parse_let_bindings(se: &Sexp) -> DslResult<Vec<LetBinding>> {
+    let items = match se {
+        Sexp::Brack(items, _) => items,
+        _ => return Err(Diag::new("let bindings must be in [..]").with_span(se_span(se))),
+    };
+    let mut bindings = Vec::new();
+    let all_pairs = items.iter().all(|it| matches!(it, Sexp::List(v, _) if v.len() == 2));
+    if all_pairs {
+        for it in items {
+            let (pair, sp) = match it {
+                Sexp::List(v, sp) => (v, sp.clone()),
+                _ => continue,
+            };
+            let (name, name_sp) = atom_sym(&pair[0]).ok_or_else(|| {
+                Diag::new("let binding name must be a symbol").with_span(se_span(&pair[0]))
+            })?;
+            let (base, ann) = split_binding_name(&name, &name_sp)?;
+            let expr = parse_expr(&pair[1])?;
+            bindings.push(LetBinding {
+                name: base.clone(),
+                rust_name: rust_value_name(&base),
+                ann,
+                expr,
+                span: sp,
+            });
+        }
+        return Ok(bindings);
+    }
+    if items.len() % 2 != 0 {
+        return Err(Diag::new("let bindings must be name/expr pairs").with_span(se_span(se)));
+    }
+    let mut idx = 0usize;
+    while idx < items.len() {
+        let (name, name_sp) = atom_sym(&items[idx]).ok_or_else(|| {
+            Diag::new("let binding name must be a symbol").with_span(se_span(&items[idx]))
+        })?;
+        let (base, ann) = split_binding_name(&name, &name_sp)?;
+        let expr = parse_expr(&items[idx + 1])?;
+        bindings.push(LetBinding {
+            name: base.clone(),
+            rust_name: rust_value_name(&base),
+            ann,
+            expr,
+            span: name_sp.clone(),
+        });
+        idx += 2;
+    }
+    Ok(bindings)
+}
+
+fn split_binding_name(name: &str, sp: &Span) -> DslResult<(String, Option<Ty>)> {
+    let mut parts = name.splitn(2, ':');
+    let base = parts.next().unwrap().to_string();
+    let ann = match parts.next() {
+        Some(t) => Some(parse_type_from_sym_checked(t, sp)?),
+        None => None,
+    };
+    let base = ensure_lisp_ident(&base, sp, "binding name")?;
+    Ok((base, ann))
 }
 
 fn parse_match(span: &Span, items: &[Sexp]) -> DslResult<Expr> {
@@ -1100,6 +1241,35 @@ pub fn parse_inline(se: &Sexp) -> DslResult<InlineDef> {
     })
 }
 
+pub fn parse_def(se: &Sexp) -> DslResult<Def> {
+    let (items, span) = match se {
+        Sexp::List(items, span) => (items, span.clone()),
+        _ => return Err(Diag::new("expected (def ...)").with_span(se_span(se))),
+    };
+    if items.len() != 3 {
+        return Err(Diag::new("def form is (def name expr)").with_span(span));
+    }
+    let (head, _) = atom_sym(&items[0])
+        .ok_or_else(|| Diag::new("expected symbol 'def'").with_span(se_span(&items[0])))?;
+    if head != "def" {
+        return Err(Diag::new("expected 'def'").with_span(se_span(&items[0])));
+    }
+    let (name, name_sp) = atom_sym(&items[1])
+        .ok_or_else(|| Diag::new("expected def name").with_span(se_span(&items[1])))?;
+    let (base, ann) = split_binding_name(&name, &name_sp)?;
+    let expr = parse_expr(&items[2])?;
+    Ok(Def {
+        name: base.clone(),
+        rust_name: rust_value_name(&base),
+        ann,
+        expr,
+        span: Span {
+            start: name_sp.start,
+            end: span.end,
+        },
+    })
+}
+
 fn atom_str(se: &Sexp) -> Option<(String, Span)> {
     match se {
         Sexp::Atom(TokKind::Str(s), sp) => Some((s.clone(), sp.clone())),
@@ -1220,6 +1390,7 @@ pub fn parse_toplevel(sexps: &[Sexp]) -> DslResult<Vec<Top>> {
             "defunion" => out.push(Top::Union(parse_union(se)?)),
             "defn" => out.push(Top::Func(parse_fn(se)?)),
             "defin" => out.push(Top::Inline(parse_inline(se)?)),
+            "def" => out.push(Top::Def(parse_def(se)?)),
             _ => {
                 return Err(Diag::new(format!("unknown top-level form '{}'", head))
                     .with_span(se_span(&items[0])));

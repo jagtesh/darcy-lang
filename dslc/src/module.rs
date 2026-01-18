@@ -18,6 +18,7 @@ struct ModuleDefs {
     variants: BTreeSet<String>,
     fns: BTreeSet<String>,
     inlines: BTreeSet<String>,
+    values: BTreeSet<String>,
 }
 
 pub fn compile_modules(
@@ -189,6 +190,7 @@ fn collect_module_defs(tops: &[Top]) -> ModuleDefs {
     let mut variants = BTreeSet::new();
     let mut fns = BTreeSet::new();
     let mut inlines = BTreeSet::new();
+    let mut values = BTreeSet::new();
     for t in tops {
         match t {
             Top::Struct(sd) => {
@@ -206,10 +208,19 @@ fn collect_module_defs(tops: &[Top]) -> ModuleDefs {
             Top::Inline(inl) => {
                 inlines.insert(inl.name.clone());
             }
+            Top::Def(d) => {
+                values.insert(d.name.clone());
+            }
             Top::Use(_) => {}
         }
     }
-    ModuleDefs { types, variants, fns, inlines }
+    ModuleDefs {
+        types,
+        variants,
+        fns,
+        inlines,
+        values,
+    }
 }
 
 fn merge_defs(dst: &mut ModuleDefs, src: ModuleDefs) {
@@ -217,6 +228,7 @@ fn merge_defs(dst: &mut ModuleDefs, src: ModuleDefs) {
     dst.variants.extend(src.variants);
     dst.fns.extend(src.fns);
     dst.inlines.extend(src.inlines);
+    dst.values.extend(src.values);
 }
 
 fn resolve_module(
@@ -231,6 +243,7 @@ fn resolve_module(
         variants: BTreeSet::new(),
         fns: BTreeSet::new(),
         inlines: BTreeSet::new(),
+        values: BTreeSet::new(),
     });
 
     let resolver = Resolver::new(&module, &defs, &info.uses, all, inline_defs)?;
@@ -264,6 +277,13 @@ fn resolve_module(
                 }
                 fd.body = resolve_expr(&resolver, &fd.body)?;
             }
+            Top::Def(d) => {
+                d.name = qualify(&module, &d.name);
+                if let Some(ann) = &d.ann {
+                    d.ann = Some(resolve_type(&resolver, ann, &d.span)?);
+                }
+                d.expr = resolve_expr(&resolver, &d.expr)?;
+            }
             Top::Inline(_) => {}
             Top::Use(_) => {}
         }
@@ -288,6 +308,13 @@ fn resolve_expr(res: &Resolver, e: &Expr) -> DslResult<Expr> {
                 args: args_out,
                 span: span.clone(),
             })
+        }
+        Expr::Var(name, span) => {
+            if let Some(full) = res.resolve_def_name(name, span) {
+                Ok(Expr::Var(full, span.clone()))
+            } else {
+                Ok(e.clone())
+            }
         }
         Expr::If {
             cond,
@@ -328,6 +355,59 @@ fn resolve_expr(res: &Resolver, e: &Expr) -> DslResult<Expr> {
             body: Box::new(resolve_expr(res, body)?),
             span: span.clone(),
         }),
+        Expr::Let { bindings, body, span } => {
+            let mut out = Vec::new();
+            for b in bindings {
+                let ann = match &b.ann {
+                    Some(t) => Some(resolve_type(res, t, &b.span)?),
+                    None => None,
+                };
+                out.push(crate::ast::LetBinding {
+                    name: b.name.clone(),
+                    rust_name: b.rust_name.clone(),
+                    ann,
+                    expr: resolve_expr(res, &b.expr)?,
+                    span: b.span.clone(),
+                });
+            }
+            Ok(Expr::Let {
+                bindings: out,
+                body: Box::new(resolve_expr(res, body)?),
+                span: span.clone(),
+            })
+        }
+        Expr::Lambda { params, body, span } => {
+            let mut out_params = Vec::new();
+            for p in params {
+                let ann = match &p.ann {
+                    Some(t) => Some(resolve_type(res, t, &p.span)?),
+                    None => None,
+                };
+                out_params.push(crate::ast::Param {
+                    name: p.name.clone(),
+                    rust_name: p.rust_name.clone(),
+                    ann,
+                    span: p.span.clone(),
+                });
+            }
+            Ok(Expr::Lambda {
+                params: out_params,
+                body: Box::new(resolve_expr(res, body)?),
+                span: span.clone(),
+            })
+        }
+        Expr::CallDyn { func, args, span } => {
+            let func = Box::new(resolve_expr(res, func)?);
+            let mut out_args = Vec::new();
+            for a in args {
+                out_args.push(resolve_expr(res, a)?);
+            }
+            Ok(Expr::CallDyn {
+                func,
+                args: out_args,
+                span: span.clone(),
+            })
+        }
         Expr::Break { value, span } => Ok(Expr::Break {
             value: match value {
                 Some(v) => Some(Box::new(resolve_expr(res, v)?)),
@@ -469,6 +549,37 @@ fn inline_subst(expr: &Expr, map: &BTreeMap<String, Expr>) -> Expr {
             val: Box::new(inline_subst(val, map)),
             span: span.clone(),
         },
+        Expr::Let { bindings, body, span } => {
+            let mut out = Vec::new();
+            let mut shadowed = map.clone();
+            for b in bindings {
+                let expr = inline_subst(&b.expr, &shadowed);
+                shadowed.remove(&b.rust_name);
+                out.push(crate::ast::LetBinding {
+                    name: b.name.clone(),
+                    rust_name: b.rust_name.clone(),
+                    ann: b.ann.clone(),
+                    expr,
+                    span: b.span.clone(),
+                });
+            }
+            Expr::Let {
+                bindings: out,
+                body: Box::new(inline_subst(body, &shadowed)),
+                span: span.clone(),
+            }
+        }
+        Expr::Lambda { params, body, span } => {
+            let mut shadowed = map.clone();
+            for p in params {
+                shadowed.remove(&p.rust_name);
+            }
+            Expr::Lambda {
+                params: params.clone(),
+                body: Box::new(inline_subst(body, &shadowed)),
+                span: span.clone(),
+            }
+        }
         Expr::Do { exprs, span } => Expr::Do {
             exprs: exprs.iter().map(|e| inline_subst(e, map)).collect(),
             span: span.clone(),
@@ -521,6 +632,11 @@ fn inline_subst(expr: &Expr, map: &BTreeMap<String, Expr>) -> Expr {
         }
         Expr::Call { op, args, span } => Expr::Call {
             op: op.clone(),
+            args: args.iter().map(|a| inline_subst(a, map)).collect(),
+            span: span.clone(),
+        },
+        Expr::CallDyn { func, args, span } => Expr::CallDyn {
+            func: Box::new(inline_subst(func, map)),
             args: args.iter().map(|a| inline_subst(a, map)).collect(),
             span: span.clone(),
         },
@@ -607,6 +723,7 @@ fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
         variants: BTreeSet::new(),
         fns: BTreeSet::new(),
         inlines: BTreeSet::new(),
+        values: BTreeSet::new(),
     };
     std_io.fns.insert("dbg".to_string());
     out.insert("std.io".to_string(), std_io);
@@ -616,6 +733,7 @@ fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
         variants: BTreeSet::new(),
         fns: BTreeSet::new(),
         inlines: BTreeSet::new(),
+        values: BTreeSet::new(),
     };
     core_num.fns.insert("abs".to_string());
     core_num.fns.insert("min".to_string());
@@ -628,6 +746,7 @@ fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
         variants: BTreeSet::new(),
         fns: BTreeSet::new(),
         inlines: BTreeSet::new(),
+        values: BTreeSet::new(),
     };
     core_vec.fns.insert("len".to_string());
     core_vec.fns.insert("is-empty".to_string());
@@ -640,6 +759,7 @@ fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
         variants: BTreeSet::new(),
         fns: BTreeSet::new(),
         inlines: BTreeSet::new(),
+        values: BTreeSet::new(),
     };
     core_str.fns.insert("len".to_string());
     core_str.fns.insert("is-empty".to_string());
@@ -653,6 +773,7 @@ fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
         variants: BTreeSet::new(),
         fns: BTreeSet::new(),
         inlines: BTreeSet::new(),
+        values: BTreeSet::new(),
     };
     core_fmt.fns.insert("dbg".to_string());
     core_fmt.fns.insert("format".to_string());
@@ -666,6 +787,7 @@ fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
         variants: BTreeSet::new(),
         fns: BTreeSet::new(),
         inlines: BTreeSet::new(),
+        values: BTreeSet::new(),
     };
     core_option.fns.insert("some".to_string());
     core_option.fns.insert("none".to_string());
@@ -680,6 +802,7 @@ fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
         variants: BTreeSet::new(),
         fns: BTreeSet::new(),
         inlines: BTreeSet::new(),
+        values: BTreeSet::new(),
     };
     core_result.fns.insert("ok".to_string());
     core_result.fns.insert("err".to_string());
@@ -694,6 +817,7 @@ fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
         variants: BTreeSet::new(),
         fns: BTreeSet::new(),
         inlines: BTreeSet::new(),
+        values: BTreeSet::new(),
     };
     core_hashmap.fns.insert("new".to_string());
     core_hashmap.fns.insert("len".to_string());
@@ -709,6 +833,7 @@ fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
         variants: BTreeSet::new(),
         fns: BTreeSet::new(),
         inlines: BTreeSet::new(),
+        values: BTreeSet::new(),
     };
     core_btreemap.fns.insert("new".to_string());
     core_btreemap.fns.insert("len".to_string());
@@ -783,7 +908,7 @@ impl Resolver {
         if self.defs.fns.contains(name) || self.defs.types.contains(name) || self.defs.variants.contains(name) {
             return Ok(qualify(&self.module, name));
         }
-        if let Some(full) = self.resolve_from_uses(name) {
+        if let Some(full) = self.resolve_callable_from_uses(name) {
             return Ok(full);
         }
         Err(Diag::new(format!("unresolved name '{}'", name)).with_span(span.clone()))
@@ -833,6 +958,53 @@ impl Resolver {
             if let Some(only) = &u.only {
                 if only.contains(&name.to_string()) {
                     return Some(qualify(&mod_name, name));
+                }
+            }
+        }
+        None
+    }
+
+    fn resolve_callable_from_uses(&self, name: &str) -> Option<String> {
+        for u in &self.uses {
+            let mod_name = module_name_from_import(&u.path).ok()?;
+            let defs = self.all.get(&mod_name)?;
+            if u.open {
+                if defs.types.contains(name)
+                    || defs.variants.contains(name)
+                    || defs.fns.contains(name)
+                    || defs.inlines.contains(name)
+                {
+                    return Some(qualify(&mod_name, name));
+                }
+            }
+            if let Some(only) = &u.only {
+                if only.contains(&name.to_string()) {
+                    return Some(qualify(&mod_name, name));
+                }
+            }
+        }
+        None
+    }
+
+    fn resolve_def_name(&self, name: &str, _span: &Span) -> Option<String> {
+        if self.defs.values.contains(name) {
+            return Some(qualify(&self.module, name));
+        }
+        self.resolve_def_from_uses(name)
+    }
+
+    fn resolve_def_from_uses(&self, name: &str) -> Option<String> {
+        for u in &self.uses {
+            let mod_name = module_name_from_import(&u.path).ok()?;
+            let defs = self.all.get(&mod_name)?;
+            if u.open && defs.values.contains(name) {
+                return Some(qualify(&mod_name, name));
+            }
+            if let Some(only) = &u.only {
+                if only.contains(&name.to_string()) {
+                    if defs.values.contains(name) {
+                        return Some(qualify(&mod_name, name));
+                    }
                 }
             }
         }
