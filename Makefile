@@ -20,4 +20,4 @@ vscode-deps:
 	cd extensions/vscode && npm install
 
 vscode-package:
-	cd extensions/vscode && npx vsce package
+	cd extensions/vscode && npx @vscode/vsce package

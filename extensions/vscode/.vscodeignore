@@ -1,0 +1,16 @@
+.vscode/**
+node_modules/**
+*.log
+*.ts
+*.map
+**/test/**
+**/__tests__/**
+
+# Repo-level artifacts
+/target/**
+/bench/**
+/examples/**
+/stdlib/**
+
+# Editor configs
+.zed/**

@@ -31,3 +31,10 @@ Alternatively, set `DARCY_LSP_PATH` to a specific `darcy-lsp` binary.
 - The extension starts `darcy-lsp` automatically when you open a `.dsl` file.
 - If you keep a local release build, the extension will also look for
   `target/release/darcy-lsp` relative to the repository root.
+
+## Packaging
+
+```sh
+cd extensions/vscode
+npx @vscode/vsce package
+```
