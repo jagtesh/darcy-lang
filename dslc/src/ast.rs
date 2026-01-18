@@ -567,18 +567,24 @@ pub fn parse_struct(se: &Sexp) -> DslResult<StructDef> {
             Sexp::List(v, sp) => (v, sp.clone()),
             _ => return Err(Diag::new("field must be (name Type)").with_span(se_span(f))),
         };
-        if fitems.len() != 2 {
-            return Err(Diag::new("field must be (name Type)").with_span(fspan));
+        if fitems.is_empty() || fitems.len() > 2 {
+            return Err(Diag::new("field must be (name Type) or (name)").with_span(fspan));
         }
         let (fname, fsp) = atom_sym(&fitems[0])
             .ok_or_else(|| Diag::new("expected field name").with_span(se_span(&fitems[0])))?;
         let fname = ensure_lisp_ident(&fname, &fsp, "field name")?;
-        let (fty_s, _) = atom_sym(&fitems[1])
-            .ok_or_else(|| Diag::new("expected field type").with_span(se_span(&fitems[1])))?;
+        let fty = if fitems.len() == 2 {
+            let (fty_s, _) = atom_sym(&fitems[1]).ok_or_else(|| {
+                Diag::new("expected field type").with_span(se_span(&fitems[1]))
+            })?;
+            parse_type_from_sym_checked(&fty_s, &fspan)?
+        } else {
+            Ty::Unknown
+        };
         fields.push(Field {
             name: fname.clone(),
             rust_name: rust_value_name(&fname),
-            ty: parse_type_from_sym_checked(&fty_s, &fspan)?,
+            ty: fty,
             span: Span {
                 start: fsp.start,
                 end: fspan.end,
@@ -638,23 +644,29 @@ pub fn parse_union(se: &Sexp) -> DslResult<UnionDef> {
                 Sexp::List(v, sp) => (v, sp.clone()),
                 _ => return Err(Diag::new("field must be (name Type)").with_span(se_span(f))),
             };
-            if fitems.len() != 2 {
-                return Err(Diag::new("field must be (name Type)").with_span(fspan));
+            if fitems.is_empty() || fitems.len() > 2 {
+                return Err(Diag::new("field must be (name Type) or (name)").with_span(fspan));
             }
             let (fname, fsp) = atom_sym(&fitems[0])
                 .ok_or_else(|| Diag::new("expected field name").with_span(se_span(&fitems[0])))?;
             let fname = ensure_lisp_ident(&fname, &fsp, "field name")?;
-        let (fty_s, _) = atom_sym(&fitems[1])
-            .ok_or_else(|| Diag::new("expected field type").with_span(se_span(&fitems[1])))?;
-        fields.push(Field {
-            name: fname.clone(),
-            rust_name: rust_value_name(&fname),
-            ty: parse_type_from_sym_checked(&fty_s, &fspan)?,
-            span: Span {
-                start: fsp.start,
-                end: fspan.end,
-            },
-        });
+            let fty = if fitems.len() == 2 {
+                let (fty_s, _) = atom_sym(&fitems[1]).ok_or_else(|| {
+                    Diag::new("expected field type").with_span(se_span(&fitems[1]))
+                })?;
+                parse_type_from_sym_checked(&fty_s, &fspan)?
+            } else {
+                Ty::Unknown
+            };
+            fields.push(Field {
+                name: fname.clone(),
+                rust_name: rust_value_name(&fname),
+                ty: fty,
+                span: Span {
+                    start: fsp.start,
+                    end: fspan.end,
+                },
+            });
         }
         variants.push(VariantDef {
             name: vname.clone(),

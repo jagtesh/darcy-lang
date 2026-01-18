@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::{
-    Def, Expr, FnDef, MapKind, MatchArm, MatchPat, StructDef, Top, Ty, UnionDef, VariantDef,
+    Def, Expr, Field, FnDef, MapKind, MatchArm, MatchPat, StructDef, Top, Ty, UnionDef,
+    VariantDef,
 };
 use crate::diag::{Diag, DslResult, Span};
 use crate::typed::{CastHint, SpanKey, TypedDef, TypedExpr, TypedFn};
@@ -95,6 +96,74 @@ pub struct TypecheckedProgram {
     pub typed_defs: Vec<TypedDef>,
 }
 
+#[derive(Debug, Clone)]
+struct InferFnSig {
+    params: Vec<InferTy>,
+    ret: InferTy,
+}
+
+#[derive(Debug, Clone)]
+struct InferFnEnv {
+    fns: BTreeMap<String, InferFnSig>,
+}
+
+impl InferFnEnv {
+    fn new() -> Self {
+        Self {
+            fns: BTreeMap::new(),
+        }
+    }
+
+    fn insert(&mut self, name: String, sig: InferFnSig) -> DslResult<()> {
+        if self.fns.contains_key(&name) {
+            return Err(Diag::new(format!("duplicate function '{}'", name)));
+        }
+        self.fns.insert(name, sig);
+        Ok(())
+    }
+
+    fn get(&self, name: &str) -> Option<&InferFnSig> {
+        self.fns.get(name)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct FieldInfer {
+    rust_name: String,
+    ty: InferTy,
+    span: Span,
+}
+
+#[derive(Debug, Clone)]
+struct StructInfer {
+    fields: Vec<FieldInfer>,
+}
+
+#[derive(Debug, Clone)]
+struct VariantInfer {
+    fields: Vec<FieldInfer>,
+}
+
+#[derive(Debug, Clone)]
+struct FieldInferEnv {
+    structs: BTreeMap<String, StructInfer>,
+    variants: BTreeMap<String, VariantInfer>,
+}
+
+#[derive(Debug, Clone)]
+struct InferFnState {
+    def: FnDef,
+    param_tys: BTreeMap<String, InferTy>,
+    param_spans: BTreeMap<String, Span>,
+    body: InferExpr,
+}
+
+#[derive(Debug, Clone)]
+struct InferDefState {
+    def: Def,
+    body: InferExpr,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum InferTy {
     Var(u32),
@@ -117,6 +186,7 @@ struct InferExpr {
 struct InferCtx {
     next_var: u32,
     subs: BTreeMap<u32, InferTy>,
+    numeric_constraints: Vec<(InferTy, Span)>,
 }
 
 impl InferCtx {
@@ -124,6 +194,7 @@ impl InferCtx {
         Self {
             next_var: 0,
             subs: BTreeMap::new(),
+            numeric_constraints: Vec::new(),
         }
     }
 
@@ -174,6 +245,9 @@ impl InferCtx {
         let b = self.resolve(b);
         match (a, b) {
             (InferTy::Var(id), t) | (t, InferTy::Var(id)) => {
+                if matches!(t, InferTy::Var(other) if other == id) {
+                    return Ok(());
+                }
                 if self.occurs(id, &t) {
                     return Err(Diag::new("type inference produced a recursive type")
                         .with_span(span.clone()));
@@ -272,6 +346,17 @@ fn infer_to_ty(ctx: &InferCtx, ty: &InferTy) -> Option<Ty> {
     }
 }
 
+fn is_concrete_ty(ty: &Ty) -> bool {
+    match ty {
+        Ty::Unknown => false,
+        Ty::Named(_) => true,
+        Ty::Vec(inner) => is_concrete_ty(inner),
+        Ty::Option(inner) => is_concrete_ty(inner),
+        Ty::Result(ok, err) => is_concrete_ty(ok) && is_concrete_ty(err),
+        Ty::Map(_, k, v) => is_concrete_ty(k) && is_concrete_ty(v),
+    }
+}
+
 fn infer_ty_rust(ctx: &InferCtx, ty: &InferTy) -> String {
     match ctx.resolve(ty) {
         InferTy::Var(id) => format!("'t{}", id),
@@ -295,6 +380,169 @@ fn infer_ty_rust(ctx: &InferCtx, ty: &InferTy) -> String {
     }
 }
 
+fn build_field_infer_env(env: &TypeEnv, ctx: &mut InferCtx) -> DslResult<FieldInferEnv> {
+    let mut structs = BTreeMap::new();
+    let mut variants = BTreeMap::new();
+
+    for sd in env.structs.values() {
+        if sd.extern_ {
+            for f in &sd.fields {
+                if matches!(f.ty, Ty::Unknown) {
+                    return Err(Diag::new(format!(
+                        "extern struct '{}' must declare a type for field '{}'",
+                        sd.name, f.name
+                    ))
+                    .with_span(f.span.clone()));
+                }
+            }
+        }
+        let fields = sd
+            .fields
+            .iter()
+            .map(|f| FieldInfer {
+                rust_name: f.rust_name.clone(),
+                ty: infer_from_ty(ctx, &f.ty),
+                span: f.span.clone(),
+            })
+            .collect();
+        structs.insert(sd.name.clone(), StructInfer { fields });
+    }
+
+    for ud in env.unions.values() {
+        if ud.extern_ {
+            for v in &ud.variants {
+                for f in &v.fields {
+                    if matches!(f.ty, Ty::Unknown) {
+                        return Err(Diag::new(format!(
+                            "extern union '{}' must declare a type for field '{}'",
+                            ud.name, f.name
+                        ))
+                        .with_span(f.span.clone()));
+                    }
+                }
+            }
+        }
+        for v in &ud.variants {
+            let fields = v
+                .fields
+                .iter()
+                .map(|f| FieldInfer {
+                    rust_name: f.rust_name.clone(),
+                    ty: infer_from_ty(ctx, &f.ty),
+                    span: f.span.clone(),
+                })
+                .collect();
+            variants.insert(
+                v.name.clone(),
+                VariantInfer {
+                    fields,
+                },
+            );
+        }
+    }
+
+    Ok(FieldInferEnv { structs, variants })
+}
+
+fn apply_field_inference(
+    env: &TypeEnv,
+    field_env: &FieldInferEnv,
+    ctx: &InferCtx,
+) -> DslResult<TypeEnv> {
+    let mut out = TypeEnv::new();
+
+    for sd in env.structs.values() {
+        let sinfo = field_env.structs.get(&sd.name).ok_or_else(|| {
+            Diag::new("internal error: missing struct inference").with_span(sd.span.clone())
+        })?;
+        let mut fields = Vec::new();
+        for (idx, f) in sd.fields.iter().enumerate() {
+            let finfo = sinfo.fields.get(idx).ok_or_else(|| {
+                Diag::new("internal error: struct field inference mismatch")
+                    .with_span(f.span.clone())
+            })?;
+            let ty = infer_to_ty(ctx, &finfo.ty).ok_or_else(|| {
+                Diag::new(format!(
+                    "cannot infer type for field '{}.{}'",
+                    sd.name, f.name
+                ))
+                .with_span(finfo.span.clone())
+            })?;
+            if !is_concrete_ty(&ty) {
+                return Err(Diag::new(format!(
+                    "cannot infer type for field '{}.{}'",
+                    sd.name, f.name
+                ))
+                .with_span(finfo.span.clone()));
+            }
+            fields.push(Field {
+                name: f.name.clone(),
+                rust_name: f.rust_name.clone(),
+                ty,
+                span: f.span.clone(),
+            });
+        }
+        out.insert_struct(StructDef {
+            name: sd.name.clone(),
+            rust_name: sd.rust_name.clone(),
+            fields,
+            span: sd.span.clone(),
+            extern_: sd.extern_,
+        })?;
+    }
+
+    for ud in env.unions.values() {
+        let mut variants = Vec::new();
+        for v in &ud.variants {
+            let vinf = field_env.variants.get(&v.name).ok_or_else(|| {
+                Diag::new("internal error: missing variant inference").with_span(v.span.clone())
+            })?;
+            let mut fields = Vec::new();
+            for (idx, f) in v.fields.iter().enumerate() {
+                let finfo = vinf.fields.get(idx).ok_or_else(|| {
+                    Diag::new("internal error: variant field inference mismatch")
+                        .with_span(f.span.clone())
+                })?;
+                let ty = infer_to_ty(ctx, &finfo.ty).ok_or_else(|| {
+                    Diag::new(format!(
+                        "cannot infer type for field '{}.{}'",
+                        v.name, f.name
+                    ))
+                    .with_span(finfo.span.clone())
+                })?;
+                if !is_concrete_ty(&ty) {
+                    return Err(Diag::new(format!(
+                        "cannot infer type for field '{}.{}'",
+                        v.name, f.name
+                    ))
+                    .with_span(finfo.span.clone()));
+                }
+                fields.push(Field {
+                    name: f.name.clone(),
+                    rust_name: f.rust_name.clone(),
+                    ty,
+                    span: f.span.clone(),
+                });
+            }
+            variants.push(VariantDef {
+                name: v.name.clone(),
+                rust_name: v.rust_name.clone(),
+                fields,
+                span: v.span.clone(),
+            });
+        }
+        out.insert_union(UnionDef {
+            name: ud.name.clone(),
+            rust_name: ud.rust_name.clone(),
+            variants,
+            span: ud.span.clone(),
+            extern_: ud.extern_,
+        })?;
+    }
+
+    Ok(out)
+}
+
 pub fn typecheck_tops(tops: &[Top]) -> DslResult<TypecheckedProgram> {
     let filtered = expand_inline_tops(tops)?;
     let mut env = TypeEnv::new();
@@ -307,11 +555,12 @@ pub fn typecheck_tops(tops: &[Top]) -> DslResult<TypecheckedProgram> {
         }
     }
 
-    let mut typed_fns = Vec::new();
-    let mut typed_defs = Vec::new();
-    let mut fn_env = FnEnv::new();
     let def_base_names = collect_def_base_names(&filtered);
-    let mut global_defs: BTreeMap<String, Ty> = BTreeMap::new();
+    let mut ctx = InferCtx::new();
+    let field_env = build_field_infer_env(&env, &mut ctx)?;
+    let mut fn_env = InferFnEnv::new();
+    let mut global_defs: BTreeMap<String, InferTy> = BTreeMap::new();
+
     for t in &filtered {
         match t {
             Top::Func(fd) => {
@@ -324,17 +573,36 @@ pub fn typecheck_tops(tops: &[Top]) -> DslResult<TypecheckedProgram> {
                     return Err(Diag::new(format!("duplicate function '{}'", fd.name))
                         .with_span(fd.span.clone()));
                 }
-                let typed = typecheck_fn(&env, &fn_env, &global_defs, &def_base_names, fd)?;
-                let sig = FnSig {
-                    params: fd
-                        .params
-                        .iter()
-                        .map(|p| typed.param_tys[&p.rust_name].clone())
-                        .collect(),
-                    ret: typed.body.ty.clone(),
+                check_param_bindings(fd, &def_base_names)?;
+                let mut params = Vec::new();
+                for p in &fd.params {
+                    let ty = match &p.ann {
+                        Some(ann) => infer_from_ty(&mut ctx, ann),
+                        None => ctx.fresh_var(),
+                    };
+                    params.push(ty);
+                }
+                if fd.extern_ {
+                    for p in &fd.params {
+                        if p.ann.is_none() {
+                            return Err(Diag::new(format!(
+                                "extern function parameter '{}' must declare a type",
+                                p.name
+                            ))
+                            .with_span(p.span.clone()));
+                        }
+                    }
+                }
+                let ret = if fd.extern_ {
+                    let ret = fd.extern_ret.clone().ok_or_else(|| {
+                        Diag::new("extern function must declare return type")
+                            .with_span(fd.span.clone())
+                    })?;
+                    infer_from_ty(&mut ctx, &ret)
+                } else {
+                    ctx.fresh_var()
                 };
-                fn_env.insert(fd.name.clone(), sig)?;
-                typed_fns.push(typed);
+                fn_env.insert(fd.name.clone(), InferFnSig { params, ret })?;
             }
             Top::Def(d) => {
                 if env.structs.contains_key(&d.name)
@@ -346,12 +614,121 @@ pub fn typecheck_tops(tops: &[Top]) -> DslResult<TypecheckedProgram> {
                     return Err(Diag::new(format!("duplicate def '{}'", d.name))
                         .with_span(d.span.clone()));
                 }
-                let typed = typecheck_def(&env, &fn_env, &global_defs, &def_base_names, &d)?;
-                global_defs.insert(d.name.clone(), typed.body.ty.clone());
-                typed_defs.push(typed);
+                let ty = if let Some(ann) = &d.ann {
+                    infer_from_ty(&mut ctx, ann)
+                } else {
+                    ctx.fresh_var()
+                };
+                global_defs.insert(d.name.clone(), ty);
             }
             _ => {}
         }
+    }
+
+    let mut infer_fns = Vec::new();
+    let mut infer_defs = Vec::new();
+    for t in &filtered {
+        match t {
+            Top::Func(fd) => {
+                let sig = fn_env.get(&fd.name).ok_or_else(|| {
+                    Diag::new("internal error: missing function signature")
+                        .with_span(fd.span.clone())
+                })?;
+                let (param_tys, param_spans) = build_param_maps(fd, sig)?;
+                apply_param_field_constraints(&env, fd, &param_tys, &param_spans, &mut ctx)?;
+                let body = if fd.extern_ {
+                    InferExpr {
+                        expr: fd.body.clone(),
+                        ty: sig.ret.clone(),
+                        casts: vec![],
+                        types: BTreeMap::new(),
+                    }
+                } else {
+                    let vars = param_tys.clone();
+                    let infer_body = infer_expr_type(
+                        &env,
+                        &field_env,
+                        &fn_env,
+                        &global_defs,
+                        &def_base_names,
+                        &mut ctx,
+                        &vars,
+                        &fd.body,
+                    )?;
+                    ctx.unify(&sig.ret, &infer_body.ty, &fd.body.span())?;
+                    infer_body
+                };
+                infer_fns.push(InferFnState {
+                    def: fd.clone(),
+                    param_tys,
+                    param_spans,
+                    body,
+                });
+            }
+            Top::Def(d) => {
+                let def_ty = global_defs.get(&d.name).ok_or_else(|| {
+                    Diag::new("internal error: missing def type").with_span(d.span.clone())
+                })?;
+                let vars: BTreeMap<String, InferTy> = BTreeMap::new();
+                let mut infer_body = infer_expr_type(
+                    &env,
+                    &field_env,
+                    &fn_env,
+                    &global_defs,
+                    &def_base_names,
+                    &mut ctx,
+                    &vars,
+                    &d.expr,
+                )?;
+                ctx.unify(def_ty, &infer_body.ty, &d.span)?;
+                infer_body.ty = def_ty.clone();
+                infer_defs.push(InferDefState {
+                    def: d.clone(),
+                    body: infer_body,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    check_numeric_constraints(&ctx)?;
+    let env = apply_field_inference(&env, &field_env, &ctx)?;
+    let mut typed_fns = Vec::new();
+    let mut typed_defs = Vec::new();
+
+    for inf in infer_fns {
+        let mut final_param_tys = BTreeMap::new();
+        for (name, ty) in &inf.param_tys {
+            let resolved = infer_to_ty(&ctx, ty).ok_or_else(|| {
+                Diag::new(format!(
+                    "cannot infer type for parameter '{}': no constraints. Add annotation like {}:Type",
+                    name, name
+                ))
+                .with_span(inf.param_spans[name].clone())
+            })?;
+            final_param_tys.insert(name.clone(), resolved);
+        }
+        let body = finalize_infer_expr(&ctx, inf.body).map_err(|mut d| {
+            if d.span.is_none() {
+                d = d.with_span(inf.def.body.span());
+            }
+            d
+        })?;
+        typed_fns.push(TypedFn {
+            def: inf.def,
+            param_tys: final_param_tys,
+            body,
+        });
+    }
+
+    for inf in infer_defs {
+        let body = finalize_infer_expr(&ctx, inf.body).map_err(|mut diag| {
+            if diag.span.is_none() {
+                diag = diag.with_span(inf.def.expr.span());
+            }
+            diag
+        })?;
+        typed_defs.push(TypedDef { def: inf.def, body });
     }
 
     Ok(TypecheckedProgram {
@@ -773,13 +1150,53 @@ pub fn typecheck_fn(
     }
 
     let mut ctx = InferCtx::new();
-    let (param_tys, param_spans) = infer_param_types(env, f, def_base_names, &mut ctx)?;
-    let mut vars = BTreeMap::new();
-    for (k, v) in &param_tys {
-        vars.insert(k.clone(), v.clone());
+    let field_env = build_field_infer_env(env, &mut ctx)?;
+    let mut infer_fns = InferFnEnv::new();
+    for (name, sig) in &fns.fns {
+        let params = sig
+            .params
+            .iter()
+            .map(|t| infer_from_ty(&mut ctx, t))
+            .collect();
+        let ret = infer_from_ty(&mut ctx, &sig.ret);
+        infer_fns.insert(name.clone(), InferFnSig { params, ret })?;
+    }
+    let mut globals: BTreeMap<String, InferTy> = BTreeMap::new();
+    for (name, ty) in global_defs {
+        globals.insert(name.clone(), infer_from_ty(&mut ctx, ty));
     }
 
-    let infer_body = infer_expr_type(env, fns, global_defs, def_base_names, &mut ctx, &vars, &f.body)?;
+    check_param_bindings(f, def_base_names)?;
+    let mut params = Vec::new();
+    for p in &f.params {
+        let ty = match &p.ann {
+            Some(ann) => infer_from_ty(&mut ctx, ann),
+            None => ctx.fresh_var(),
+        };
+        params.push(ty);
+    }
+    let sig = InferFnSig {
+        params,
+        ret: ctx.fresh_var(),
+    };
+    if infer_fns.get(&f.name).is_none() {
+        infer_fns.insert(f.name.clone(), sig.clone())?;
+    }
+    let (param_tys, param_spans) = build_param_maps(f, &sig)?;
+    apply_param_field_constraints(env, f, &param_tys, &param_spans, &mut ctx)?;
+
+    let infer_body = infer_expr_type(
+        env,
+        &field_env,
+        &infer_fns,
+        &globals,
+        def_base_names,
+        &mut ctx,
+        &param_tys,
+        &f.body,
+    )?;
+    ctx.unify(&sig.ret, &infer_body.ty, &f.body.span())?;
+    check_numeric_constraints(&ctx)?;
     let mut final_param_tys = BTreeMap::new();
     for (name, ty) in &param_tys {
         let resolved = infer_to_ty(&ctx, ty).ok_or_else(|| {
@@ -806,6 +1223,7 @@ pub fn typecheck_fn(
     })
 }
 
+#[allow(dead_code)]
 fn typecheck_def(
     env: &TypeEnv,
     fns: &FnEnv,
@@ -814,14 +1232,30 @@ fn typecheck_def(
     d: &Def,
 ) -> DslResult<TypedDef> {
     let mut ctx = InferCtx::new();
+    let field_env = build_field_infer_env(env, &mut ctx)?;
+    let mut infer_fns = InferFnEnv::new();
+    for (name, sig) in &fns.fns {
+        let params = sig
+            .params
+            .iter()
+            .map(|t| infer_from_ty(&mut ctx, t))
+            .collect();
+        let ret = infer_from_ty(&mut ctx, &sig.ret);
+        infer_fns.insert(name.clone(), InferFnSig { params, ret })?;
+    }
+    let mut globals: BTreeMap<String, InferTy> = BTreeMap::new();
+    for (name, ty) in global_defs {
+        globals.insert(name.clone(), infer_from_ty(&mut ctx, ty));
+    }
     let vars: BTreeMap<String, InferTy> = BTreeMap::new();
     let mut infer_body =
-        infer_expr_type(env, fns, global_defs, def_base_names, &mut ctx, &vars, &d.expr)?;
+        infer_expr_type(env, &field_env, &infer_fns, &globals, def_base_names, &mut ctx, &vars, &d.expr)?;
     if let Some(ann) = &d.ann {
         let ann_ty = infer_from_ty(&mut ctx, ann);
         ctx.unify(&ann_ty, &infer_body.ty, &d.span)?;
         infer_body.ty = ann_ty;
     }
+    check_numeric_constraints(&ctx)?;
     let body = finalize_infer_expr(&ctx, infer_body).map_err(|mut diag| {
         if diag.span.is_none() {
             diag = diag.with_span(d.expr.span());
@@ -851,17 +1285,10 @@ fn collect_field_constraints(expr: &Expr, out: &mut Vec<(String, String)>) {
     }
 }
 
-fn infer_param_types(
-    env: &TypeEnv,
-    f: &FnDef,
-    def_base_names: &BTreeSet<String>,
-    ctx: &mut InferCtx,
-) -> DslResult<(BTreeMap<String, InferTy>, BTreeMap<String, Span>)> {
-    let mut param_tys: BTreeMap<String, InferTy> = BTreeMap::new();
-    let mut param_spans: BTreeMap<String, Span> = BTreeMap::new();
-
+fn check_param_bindings(f: &FnDef, def_base_names: &BTreeSet<String>) -> DslResult<()> {
+    let mut seen = BTreeSet::new();
     for p in &f.params {
-        if param_tys.contains_key(&p.rust_name) {
+        if !seen.insert(p.rust_name.clone()) {
             return Err(
                 Diag::new(format!("duplicate parameter '{}'", p.name)).with_span(p.span.clone()),
             );
@@ -872,14 +1299,34 @@ fn infer_param_types(
                     .with_span(p.span.clone()),
             );
         }
-        let ty = match &p.ann {
-            Some(ann) => infer_from_ty(ctx, ann),
-            None => ctx.fresh_var(),
-        };
-        param_tys.insert(p.rust_name.clone(), ty);
+    }
+    Ok(())
+}
+
+fn build_param_maps(
+    f: &FnDef,
+    sig: &InferFnSig,
+) -> DslResult<(BTreeMap<String, InferTy>, BTreeMap<String, Span>)> {
+    if sig.params.len() != f.params.len() {
+        return Err(Diag::new("internal error: function parameter arity mismatch")
+            .with_span(f.span.clone()));
+    }
+    let mut param_tys = BTreeMap::new();
+    let mut param_spans = BTreeMap::new();
+    for (p, ty) in f.params.iter().zip(sig.params.iter()) {
+        param_tys.insert(p.rust_name.clone(), ty.clone());
         param_spans.insert(p.rust_name.clone(), p.span.clone());
     }
+    Ok((param_tys, param_spans))
+}
 
+fn apply_param_field_constraints(
+    env: &TypeEnv,
+    f: &FnDef,
+    param_tys: &BTreeMap<String, InferTy>,
+    param_spans: &BTreeMap<String, Span>,
+    ctx: &mut InferCtx,
+) -> DslResult<()> {
     let mut constraints: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut seen = Vec::new();
     collect_field_constraints(&f.body, &mut seen);
@@ -946,7 +1393,10 @@ fn infer_param_types(
                 }
                 continue;
             }
-            InferTy::Option(_) | InferTy::Result(_, _) | InferTy::Map(_, _, _) | InferTy::Fn(_, _) => {
+            InferTy::Option(_)
+            | InferTy::Result(_, _)
+            | InferTy::Map(_, _, _)
+            | InferTy::Fn(_, _) => {
                 return Err(Diag::new("cannot access field on non-struct type")
                     .with_span(param_spans[&p].clone()))
             }
@@ -988,13 +1438,46 @@ fn infer_param_types(
             &param_spans[&p],
         )?;
     }
-    Ok((param_tys, param_spans))
+    Ok(())
 }
 
 fn fmt_set(s: &BTreeSet<String>) -> String {
     let mut v: Vec<_> = s.iter().cloned().collect();
     v.sort();
     format!("{{{}}}", v.join(", "))
+}
+
+fn infer_union_from_match_arms(
+    env: &TypeEnv,
+    arms: &[MatchArm],
+    span: &Span,
+) -> DslResult<Option<String>> {
+    let mut union_name: Option<String> = None;
+    for arm in arms {
+        if let MatchPat::Variant { name, span: psp, .. } = &arm.pat {
+            let (u, _) = env
+                .variants
+                .get(name)
+                .ok_or_else(|| Diag::new(format!("unknown variant '{}'", name)).with_span(psp.clone()))?;
+            match &union_name {
+                Some(cur) if cur != u => {
+                    return Err(Diag::new(format!(
+                        "variant '{}' does not belong to '{}'",
+                        name, cur
+                    ))
+                    .with_span(psp.clone()));
+                }
+                None => union_name = Some(u.clone()),
+                _ => {}
+            }
+        }
+    }
+    if union_name.is_none() {
+        return Err(
+            Diag::new("cannot infer union type from match").with_span(span.clone()),
+        );
+    }
+    Ok(union_name)
 }
 
 #[derive(Debug, Clone)]
@@ -1005,21 +1488,33 @@ struct LoopFrame {
 
 fn infer_expr_type(
     env: &TypeEnv,
-    fns: &FnEnv,
-    globals: &BTreeMap<String, Ty>,
+    field_env: &FieldInferEnv,
+    fns: &InferFnEnv,
+    globals: &BTreeMap<String, InferTy>,
     def_base_names: &BTreeSet<String>,
     ctx: &mut InferCtx,
     vars: &BTreeMap<String, InferTy>,
     e: &Expr,
 ) -> DslResult<InferExpr> {
     let mut loop_stack = Vec::new();
-    infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, &mut loop_stack, e)
+    infer_expr_type_internal(
+        env,
+        field_env,
+        fns,
+        globals,
+        def_base_names,
+        ctx,
+        vars,
+        &mut loop_stack,
+        e,
+    )
 }
 
 fn infer_expr_type_internal(
     env: &TypeEnv,
-    fns: &FnEnv,
-    globals: &BTreeMap<String, Ty>,
+    field_env: &FieldInferEnv,
+    fns: &InferFnEnv,
+    globals: &BTreeMap<String, InferTy>,
     def_base_names: &BTreeSet<String>,
     ctx: &mut InferCtx,
     vars: &BTreeMap<String, InferTy>,
@@ -1064,7 +1559,7 @@ fn infer_expr_type_internal(
             let ty = if let Some(local) = vars.get(v) {
                 local.clone()
             } else if let Some(global) = globals.get(v) {
-                infer_from_ty(ctx, global)
+                global.clone()
             } else {
                 return Err(
                     Diag::new(format!("unknown variable '{}'", v)).with_span(sp.clone())
@@ -1084,7 +1579,7 @@ fn infer_expr_type_internal(
             let mut types = BTreeMap::new();
             let mut elem_tys = Vec::new();
             for el in elems {
-                let te = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, el)?;
+                let te = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, el)?;
                 casts.extend(te.casts.clone());
                 types.extend(te.types);
                 elem_tys.push((te.ty, el.span()));
@@ -1147,6 +1642,7 @@ fn infer_expr_type_internal(
                 }
                 let te = infer_expr_type_internal(
                     env,
+                    field_env,
                     fns,
                     globals,
                     def_base_names,
@@ -1167,6 +1663,7 @@ fn infer_expr_type_internal(
             }
             let tbody = infer_expr_type_internal(
                 env,
+                field_env,
                 fns,
                 globals,
                 def_base_names,
@@ -1214,6 +1711,7 @@ fn infer_expr_type_internal(
             }
             let tbody = infer_expr_type_internal(
                 env,
+                field_env,
                 fns,
                 globals,
                 def_base_names,
@@ -1237,6 +1735,7 @@ fn infer_expr_type_internal(
             let mut types = BTreeMap::new();
             let tfunc = infer_expr_type_internal(
                 env,
+                field_env,
                 fns,
                 globals,
                 def_base_names,
@@ -1251,6 +1750,7 @@ fn infer_expr_type_internal(
             for a in args {
                 let ta = infer_expr_type_internal(
                     env,
+                    field_env,
                     fns,
                     globals,
                     def_base_names,
@@ -1279,7 +1779,7 @@ fn infer_expr_type_internal(
             let mut types = BTreeMap::new();
             let mut last_ty = InferTy::Named("()".to_string());
             for ex in exprs {
-                let te = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, ex)?;
+                let te = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, ex)?;
                 casts.extend(te.casts.clone());
                 types.extend(te.types.clone());
                 last_ty = te.ty;
@@ -1300,18 +1800,18 @@ fn infer_expr_type_internal(
         } => {
             let mut casts = Vec::new();
             let mut types = BTreeMap::new();
-            let tcond = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, cond)?;
+            let tcond = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, cond)?;
             casts.extend(tcond.casts.clone());
             types.extend(tcond.types.clone());
             let bool_ty = InferTy::Named("bool".to_string());
             ctx.unify(&tcond.ty, &bool_ty, &cond.span())?;
 
-            let tthen = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, then_br)?;
+            let tthen = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, then_br)?;
             casts.extend(tthen.casts.clone());
             types.extend(tthen.types.clone());
 
             let out_ty = if let Some(else_br) = else_br {
-                let telse = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, else_br)?;
+                let telse = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, else_br)?;
                 casts.extend(telse.casts.clone());
                 types.extend(telse.types.clone());
                 ctx.unify(&tthen.ty, &telse.ty, &else_br.span())?;
@@ -1336,7 +1836,7 @@ fn infer_expr_type_internal(
                 result_ty: result_ty.clone(),
                 saw_break: false,
             });
-            let tbody = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, body)?;
+            let tbody = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, body)?;
             casts.extend(tbody.casts.clone());
             types.extend(tbody.types.clone());
             let frame = loop_stack.pop().expect("loop frame");
@@ -1356,7 +1856,7 @@ fn infer_expr_type_internal(
         Expr::While { cond, body, span } => {
             let mut casts = Vec::new();
             let mut types = BTreeMap::new();
-            let tcond = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, cond)?;
+            let tcond = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, cond)?;
             casts.extend(tcond.casts.clone());
             types.extend(tcond.types.clone());
             let bool_ty = InferTy::Named("bool".to_string());
@@ -1367,7 +1867,7 @@ fn infer_expr_type_internal(
                 result_ty: result_ty.clone(),
                 saw_break: false,
             });
-            let tbody = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, body)?;
+            let tbody = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, body)?;
             casts.extend(tbody.casts.clone());
             types.extend(tbody.types.clone());
             let frame = loop_stack.pop().expect("loop frame");
@@ -1390,8 +1890,8 @@ fn infer_expr_type_internal(
 
             let elem_ty = match iter {
                 crate::ast::Iterable::Range(range) => {
-                    let tstart = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, &range.start)?;
-                    let tend = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, &range.end)?;
+                    let tstart = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, &range.start)?;
+                    let tend = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, &range.end)?;
                     casts.extend(tstart.casts.clone());
                     casts.extend(tend.casts.clone());
                     types.extend(tstart.types.clone());
@@ -1399,7 +1899,7 @@ fn infer_expr_type_internal(
                     ctx.unify(&tstart.ty, &tend.ty, &range.end.span())?;
                     let mut elem_ty = ctx.resolve(&tstart.ty);
                     if let Some(step) = &range.step {
-                        let tstep = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, step)?;
+                        let tstep = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, step)?;
                         casts.extend(tstep.casts.clone());
                         types.extend(tstep.types.clone());
                         ctx.unify(&elem_ty, &tstep.ty, &step.span())?;
@@ -1413,7 +1913,7 @@ fn infer_expr_type_internal(
                     elem_ty
                 }
                 crate::ast::Iterable::Expr(ex) => {
-                    let titer = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, ex)?;
+                    let titer = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, ex)?;
                     casts.extend(titer.casts.clone());
                     types.extend(titer.types.clone());
                     let iter_ty = ctx.resolve(&titer.ty);
@@ -1440,6 +1940,7 @@ fn infer_expr_type_internal(
             });
             let tbody = infer_expr_type_internal(
                 env,
+                field_env,
                 fns,
                 globals,
                 def_base_names,
@@ -1475,7 +1976,7 @@ fn infer_expr_type_internal(
             let mut casts = Vec::new();
             let mut types = BTreeMap::new();
             let value_ty = if let Some(v) = value {
-                let tv = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, v)?;
+                let tv = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, v)?;
                 casts.extend(tv.casts.clone());
                 types.extend(tv.types.clone());
                 tv.ty
@@ -1536,8 +2037,8 @@ fn infer_expr_type_internal(
             }
 
             for (k, v) in entries {
-                let tk = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, k)?;
-                let tv = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, v)?;
+                let tk = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, k)?;
+                let tv = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, v)?;
                 casts.extend(tk.casts.clone());
                 casts.extend(tv.casts.clone());
                 types.extend(tk.types);
@@ -1567,7 +2068,7 @@ fn infer_expr_type_internal(
             })
         }
         Expr::Field { base, field, span } => {
-            let tb = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, base)?;
+            let tb = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, base)?;
             let base_ty = ctx.resolve(&tb.ty);
             let (struct_name, is_vec) = match base_ty {
                 InferTy::Named(n) => (n, false),
@@ -1600,11 +2101,11 @@ fn infer_expr_type_internal(
                     )
                 }
             };
-            let sd = env
+            let sinfo = field_env
                 .structs
                 .get(&struct_name)
                 .ok_or_else(|| Diag::new(format!("unknown type '{}'", struct_name)).with_span(span.clone()))?;
-            let f = sd
+            let f = sinfo
                 .fields
                 .iter()
                 .find(|ff| ff.rust_name == *field)
@@ -1613,7 +2114,7 @@ fn infer_expr_type_internal(
                         .with_span(span.clone())
                 })?;
 
-            let field_ty = infer_from_ty(ctx, &f.ty);
+            let field_ty = f.ty.clone();
             let ty = if is_vec {
                 InferTy::Vec(Box::new(field_ty))
             } else {
@@ -1629,13 +2130,17 @@ fn infer_expr_type_internal(
             })
         }
         Expr::Match { scrutinee, arms, span } => {
-            let scrut = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, scrutinee)?;
+            let scrut = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, scrutinee)?;
             let union_name = match ctx.resolve(&scrut.ty) {
                 InferTy::Named(n) => n,
                 InferTy::Var(_) => {
-                    return Err(
-                        Diag::new("cannot match on unknown type").with_span(span.clone()),
-                    )
+                    let inferred = infer_union_from_match_arms(env, arms, span)?;
+                    let inferred = inferred.ok_or_else(|| {
+                        Diag::new("cannot infer union type from match").with_span(span.clone())
+                    })?;
+                    let target = InferTy::Named(inferred.clone());
+                    ctx.unify(&scrut.ty, &target, span)?;
+                    inferred
                 }
                 InferTy::Vec(_) => {
                     return Err(Diag::new("cannot match on vector type").with_span(span.clone()))
@@ -1659,10 +2164,14 @@ fn infer_expr_type_internal(
                 let mut arm_vars = vars.clone();
                 match &arm.pat {
                     MatchPat::Variant { name, bindings, span: psp } => {
-                        let (u, vdef) = env
+                        let (u, _vdef) = env
                             .variants
                             .get(name)
                             .ok_or_else(|| Diag::new(format!("unknown variant '{}'", name)).with_span(psp.clone()))?;
+                        let vinf = field_env.variants.get(name).ok_or_else(|| {
+                            Diag::new("internal error: missing variant inference")
+                                .with_span(psp.clone())
+                        })?;
                         if u != &union_name {
                             return Err(Diag::new(format!(
                                 "variant '{}' does not belong to '{}'",
@@ -1672,7 +2181,7 @@ fn infer_expr_type_internal(
                         }
                         seen.insert(name.clone());
                         for (field, binding, bspan) in bindings {
-                            let f = vdef
+                            let f = vinf
                                 .fields
                                 .iter()
                                 .find(|ff| ff.rust_name == *field)
@@ -1684,7 +2193,7 @@ fn infer_expr_type_internal(
                                     .with_span(bspan.clone())
                                 })?;
                             if binding != "_" {
-                                arm_vars.insert(binding.clone(), infer_from_ty(ctx, &f.ty));
+                                arm_vars.insert(binding.clone(), f.ty.clone());
                             }
                         }
                     }
@@ -1695,6 +2204,7 @@ fn infer_expr_type_internal(
 
                 let tarm = infer_expr_type_internal(
                     env,
+                    field_env,
                     fns,
                     globals,
                     def_base_names,
@@ -1764,8 +2274,8 @@ fn infer_expr_type_internal(
                             )
                         }
                     };
-                    let tk = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, key)?;
-                    let tv = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, val)?;
+                    let tk = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, key)?;
+                    let tv = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, val)?;
                     casts.extend(tk.casts.clone());
                     casts.extend(tv.casts.clone());
                     types.extend(tk.types);
@@ -1799,7 +2309,7 @@ fn infer_expr_type_internal(
             let mut casts = Vec::new();
             let mut types = BTreeMap::new();
             for a in args {
-                let ta = infer_expr_type_internal(env, fns, globals, def_base_names, ctx, vars, loop_stack, a)?;
+                let ta = infer_expr_type_internal(env, field_env, fns, globals, def_base_names, ctx, vars, loop_stack, a)?;
                 casts.extend(ta.casts.clone());
                 types.extend(ta.types.clone());
                 targs.push(ta);
@@ -2298,7 +2808,11 @@ fn infer_expr_type_internal(
                 }
                 _ if env.structs.contains_key(op) => {
                     let sd = env.structs.get(op).unwrap();
-                    if targs.len() != sd.fields.len() {
+                    let sinfo = field_env.structs.get(op).ok_or_else(|| {
+                        Diag::new("internal error: missing struct inference")
+                            .with_span(span.clone())
+                    })?;
+                    if targs.len() != sinfo.fields.len() {
                         return Err(Diag::new(format!(
                             "struct '{}' expects {} fields",
                             op,
@@ -2306,9 +2820,8 @@ fn infer_expr_type_internal(
                         ))
                         .with_span(span.clone()));
                     }
-                    for (idx, (arg, field)) in targs.iter().zip(sd.fields.iter()).enumerate() {
-                        let field_ty = infer_from_ty(ctx, &field.ty);
-                        ctx.unify(&arg.ty, &field_ty, &args[idx].span())?;
+                    for (idx, (arg, field)) in targs.iter().zip(sinfo.fields.iter()).enumerate() {
+                        ctx.unify(&arg.ty, &field.ty, &args[idx].span())?;
                     }
                     let out_ty = InferTy::Named(op.to_string());
                     types.insert(SpanKey::new(span), out_ty.clone());
@@ -2321,7 +2834,11 @@ fn infer_expr_type_internal(
                 }
                 _ if env.variants.contains_key(op) => {
                     let (union_name, vdef) = env.variants.get(op).unwrap();
-                    if targs.len() != vdef.fields.len() {
+                    let vinf = field_env.variants.get(op).ok_or_else(|| {
+                        Diag::new("internal error: missing variant inference")
+                            .with_span(span.clone())
+                    })?;
+                    if targs.len() != vinf.fields.len() {
                         return Err(Diag::new(format!(
                             "variant '{}' expects {} arguments",
                             op,
@@ -2329,9 +2846,8 @@ fn infer_expr_type_internal(
                         ))
                         .with_span(span.clone()));
                     }
-                    for (idx, (arg, field)) in targs.iter().zip(vdef.fields.iter()).enumerate() {
-                        let field_ty = infer_from_ty(ctx, &field.ty);
-                        ctx.unify(&arg.ty, &field_ty, &args[idx].span())?;
+                    for (idx, (arg, field)) in targs.iter().zip(vinf.fields.iter()).enumerate() {
+                        ctx.unify(&arg.ty, &field.ty, &args[idx].span())?;
                     }
                     let out_ty = InferTy::Named(union_name.clone());
                     types.insert(SpanKey::new(span), out_ty.clone());
@@ -2353,10 +2869,9 @@ fn infer_expr_type_internal(
                         .with_span(span.clone()));
                     }
                     for (idx, (arg, param_ty)) in targs.iter().zip(sig.params.iter()).enumerate() {
-                        let param_ty = infer_from_ty(ctx, param_ty);
-                        ctx.unify(&arg.ty, &param_ty, &args[idx].span())?;
+                        ctx.unify(&arg.ty, param_ty, &args[idx].span())?;
                     }
-                    let out_ty = infer_from_ty(ctx, &sig.ret);
+                    let out_ty = sig.ret.clone();
                     types.insert(SpanKey::new(span), out_ty.clone());
                     Ok(InferExpr {
                         expr: e.clone(),
@@ -2550,10 +3065,11 @@ fn infer_numeric_unary(
 ) -> DslResult<InferTy> {
     let resolved = ctx.resolve(ty);
     match resolved {
-        InferTy::Var(_) => Err(Diag::new(
-            "ambiguous numeric operator types; add a literal or annotation",
-        )
-        .with_span(op_sp.clone())),
+        InferTy::Var(_) => {
+            ctx.numeric_constraints
+                .push((resolved.clone(), op_sp.clone()));
+            Ok(resolved)
+        }
         InferTy::Vec(_) => Err(Diag::new("numeric operators expect scalars")
             .with_span(arg_sp.clone())),
         InferTy::Option(_) | InferTy::Result(_, _) | InferTy::Map(_, _, _) | InferTy::Fn(_, _) => Err(
@@ -2646,10 +3162,11 @@ fn infer_numeric_binop(
 
     match (&a_res, &b_res) {
         (InferTy::Var(_), InferTy::Var(_)) => {
-            return Err(Diag::new(
-                "ambiguous numeric operator types; add a literal or annotation",
-            )
-            .with_span(op_sp.clone()))
+            ctx.unify(&a_res, &b_res, op_sp)?;
+            let merged = ctx.resolve(&a_res);
+            ctx.numeric_constraints
+                .push((merged.clone(), op_sp.clone()));
+            return Ok((merged, vec![]));
         }
         (InferTy::Var(_), InferTy::Vec(inner)) => {
             ctx.unify(&a_res, inner, op_sp)?;
@@ -2779,6 +3296,24 @@ fn is_numeric(t: &Ty) -> bool {
             || s == "f32"
             || s == "f64"
     )
+}
+
+fn check_numeric_constraints(ctx: &InferCtx) -> DslResult<()> {
+    for (ty, span) in &ctx.numeric_constraints {
+        let resolved = ctx.resolve(ty);
+        let concrete = infer_to_ty(ctx, &resolved).ok_or_else(|| {
+            Diag::new("ambiguous numeric operator types; add a literal or annotation")
+                .with_span(span.clone())
+        })?;
+        if !is_numeric(&concrete) {
+            return Err(Diag::new(format!(
+                "operator expects numeric type, got '{}'",
+                concrete.rust()
+            ))
+            .with_span(span.clone()));
+        }
+    }
+    Ok(())
 }
 
 fn inline_subst_iterable(

@@ -52,6 +52,8 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
   (price f64))
 ```
 
+- Field types can be omitted when inferable: `(defstruct order (qty) (price))`.
+
 ### Unions (discriminated unions)
 
 ```
@@ -59,6 +61,8 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
   (ok (value i32))
   (err (code i32) (msg i32)))
 ```
+
+- Variant field types can be omitted when inferable: `(defunion result (ok (value)) (err (code) (msg)))`.
 
 ### Functions
 

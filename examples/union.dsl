@@ -1,13 +1,18 @@
 (defunion shape
-  (circle (radius f64))
-  (rect (w f64) (h f64))
+  (circle (radius))
+  (rect (w) (h))
   (point))
+
+(defin square [x]
+  (* x x))
 
 (defn area [s:shape]
   (match s
-    (circle (radius r) (* r r))
+    (circle (radius r) (square r))
     (rect (w w) (h h) (* w h))
     (point 0.0)))
 
 (defn main []
-  (dbg (area (circle 3.0))))
+  (do
+    (dbg (area (circle 3.0)))
+    (dbg (area (rect 2.0 3.0)))))
