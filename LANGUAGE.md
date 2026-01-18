@@ -16,7 +16,7 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
   - Line: `; comment`
   - Block: `#| comment |#`
 - **Strings**: double-quoted, e.g. `"hello"`. Escapes: `\\`, `\"`, `\n`, `\t`, `\r`.
-- **Reserved keywords** (cannot be used as identifiers): `defn`, `definline`, `defstruct`, `defunion`, `extern`, `match`, `if`, `loop`, `while`, `for`, `break`, `continue`, `use`, `open`, `vec`, `range`, `range-incl`.
+- **Reserved keywords** (cannot be used as identifiers): `defn`, `defin`, `defstruct`, `defunion`, `extern`, `match`, `if`, `loop`, `while`, `for`, `break`, `continue`, `use`, `open`, `vec`, `range`, `range-incl`.
 
 ## Literals
 
@@ -73,7 +73,7 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 ### Inline (displaced closures)
 
 ```
-(definline inc [x]
+(defin inc [x]
   (+ x 1))
 ```
 

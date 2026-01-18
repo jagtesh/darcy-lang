@@ -20,7 +20,7 @@ What it supports (MVP):
   - debug print: `(dbg expr)`
   - formatted print: `(core.fmt/print "x={}\n" x)`, `(core.fmt/println "x={}" x)`
   - extern wrapper: `(extern (defstruct ...))`, `(extern (defunion ...))`, `(extern (defn name [params] RetType))`
-  - inline expansion: `(definline name [params] expr)`
+  - inline expansion: `(defin name [params] expr)`
   - comments: `; line` and `#| block |#`
   - modules: `(use std.io)`, `(use std.io :as io)`, `(use std.io :only (dbg))`, `(open std.io)`
 

@@ -451,7 +451,7 @@ fn is_reserved_ident(name: &str) -> bool {
     matches!(
         name,
         "defn"
-            | "definline"
+            | "defin"
             | "defstruct"
             | "defunion"
             | "extern"
@@ -1054,15 +1054,15 @@ pub fn parse_fn(se: &Sexp) -> DslResult<FnDef> {
 pub fn parse_inline(se: &Sexp) -> DslResult<InlineDef> {
     let (items, span) = match se {
         Sexp::List(items, span) => (items, span.clone()),
-        _ => return Err(Diag::new("expected (definline ...)").with_span(se_span(se))),
+        _ => return Err(Diag::new("expected (defin ...)").with_span(se_span(se))),
     };
     if items.len() != 4 {
-        return Err(Diag::new("definline form is (definline name [params] body)").with_span(span));
+        return Err(Diag::new("defin form is (defin name [params] body)").with_span(span));
     }
     let (head, _) = atom_sym(&items[0])
-        .ok_or_else(|| Diag::new("expected symbol 'definline'").with_span(se_span(&items[0])))?;
-    if head != "definline" {
-        return Err(Diag::new("expected 'definline'").with_span(se_span(&items[0])));
+        .ok_or_else(|| Diag::new("expected symbol 'defin'").with_span(se_span(&items[0])))?;
+    if head != "defin" {
+        return Err(Diag::new("expected 'defin'").with_span(se_span(&items[0])));
     }
     let (name, name_sp) = atom_sym(&items[1])
         .ok_or_else(|| Diag::new("expected inline function name").with_span(se_span(&items[1])))?;
@@ -1200,7 +1200,7 @@ pub fn parse_toplevel(sexps: &[Sexp]) -> DslResult<Vec<Top>> {
             "defstruct" => out.push(Top::Struct(parse_struct(se)?)),
             "defunion" => out.push(Top::Union(parse_union(se)?)),
             "defn" => out.push(Top::Func(parse_fn(se)?)),
-            "definline" => out.push(Top::Inline(parse_inline(se)?)),
+            "defin" => out.push(Top::Inline(parse_inline(se)?)),
             _ => {
                 return Err(Diag::new(format!("unknown top-level form '{}'", head))
                     .with_span(se_span(&items[0])));
