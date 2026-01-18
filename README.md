@@ -8,14 +8,19 @@ What it supports (MVP):
    - params are symbols like `o:order` (type annotation required unless inference is unambiguous)
 - Expressions:
   - numeric literals (ints default to i32, floats to f64)
+  - if: `(if cond then [else])`
+  - loops: `(loop expr)`, `(while cond expr)`, `(for i (range 0 10) expr)`
+  - loop control: `(break [expr])`, `(continue)`
   - variables
   - field access sugar: `o.qty`
   - binary ops: `+ - * /` in prefix form: `(* a b)`
   - unions + match: `(defunion name (variant (field Type) ...) ...)`, `(match x (variant (field v) expr) (_ expr))`
   - vectors: `[1 2 3]`, `(vec<i32> 1 2 3)`
+  - vector index: `(core.vec/get v i)`, `(core.vec/set v i x)`
   - debug print: `(dbg expr)`
   - formatted print: `(core.fmt/print "x={}\n" x)`, `(core.fmt/println "x={}" x)`
   - extern wrapper: `(extern (defstruct ...))`, `(extern (defunion ...))`, `(extern (defn name [params] RetType))`
+  - inline expansion: `(definline name [params] expr)`
   - comments: `; line` and `#| block |#`
   - modules: `(use std.io)`, `(use std.io :as io)`, `(use std.io :only (dbg))`, `(open std.io)`
 

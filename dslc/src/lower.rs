@@ -153,6 +153,38 @@ fn lower_expr(
         }
         Expr::Pair { .. } => "/* invalid pair */".to_string(),
         Expr::Var(v, _) => v.clone(),
+        Expr::If { cond, then_br, else_br, .. } => {
+            let cond = lower_expr(cond, casts, types, structs, variants, fn_names, type_names);
+            let then_br = lower_expr(then_br, casts, types, structs, variants, fn_names, type_names);
+            if let Some(else_br) = else_br {
+                let else_br =
+                    lower_expr(else_br, casts, types, structs, variants, fn_names, type_names);
+                format!("if {} {{ {} }} else {{ {} }}", cond, then_br, else_br)
+            } else {
+                format!("if {} {{ {} }} else {{ () }}", cond, then_br)
+            }
+        }
+        Expr::Loop { body, .. } => {
+            let body = lower_expr(body, casts, types, structs, variants, fn_names, type_names);
+            format!("loop {{ {}; }}", body)
+        }
+        Expr::While { cond, body, .. } => {
+            let cond = lower_expr(cond, casts, types, structs, variants, fn_names, type_names);
+            let body = lower_expr(body, casts, types, structs, variants, fn_names, type_names);
+            format!("loop {{ if !({}) {{ break; }} {}; }}", cond, body)
+        }
+        Expr::For { var, range, body, .. } => {
+            lower_for_expr(var, range, body, casts, types, structs, variants, fn_names, type_names)
+        }
+        Expr::Break { value, .. } => {
+            if let Some(v) = value {
+                let v = lower_expr(v, casts, types, structs, variants, fn_names, type_names);
+                format!("break {}", v)
+            } else {
+                "break".to_string()
+            }
+        }
+        Expr::Continue { .. } => "continue".to_string(),
         Expr::MapLit { kind, entries, .. } => {
             let map_ty = match kind {
                 MapKind::Hash => "std::collections::HashMap",
@@ -327,6 +359,20 @@ fn lower_expr(
                 return format!(
                     "({}).is_empty()",
                     lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names)
+                );
+            }
+            if op == "core.vec/get" && args.len() == 2 {
+                let v = lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names);
+                let idx = lower_expr(&args[1], casts, types, structs, variants, fn_names, type_names);
+                return format!("({})[({}) as usize].clone()", v, idx);
+            }
+            if op == "core.vec/set" && args.len() == 3 {
+                let v = lower_expr(&args[0], casts, types, structs, variants, fn_names, type_names);
+                let idx = lower_expr(&args[1], casts, types, structs, variants, fn_names, type_names);
+                let val = lower_expr(&args[2], casts, types, structs, variants, fn_names, type_names);
+                return format!(
+                    "{{ let mut __v = ({}).clone(); __v[({}) as usize] = {}; () }}",
+                    v, idx, val
                 );
             }
             if op == "core.str/len" && args.len() == 1 {
@@ -679,6 +725,68 @@ fn vec_scalar_binop(
         "({}).into_iter().map(|__x| __x {} {}).collect::<Vec<_>>()",
         vec_render, op, scalar
     )
+}
+
+fn lower_for_expr(
+    var: &str,
+    range: &crate::ast::RangeExpr,
+    body: &Expr,
+    casts: &[crate::typed::CastHint],
+    types: &BTreeMap<SpanKey, Ty>,
+    structs: &BTreeMap<String, StructDef>,
+    variants: &BTreeMap<String, (String, VariantDef)>,
+    fn_names: &BTreeMap<String, String>,
+    type_names: &BTreeMap<String, String>,
+) -> String {
+    let start = lower_expr(&range.start, casts, types, structs, variants, fn_names, type_names);
+    let end = lower_expr(&range.end, casts, types, structs, variants, fn_names, type_names);
+    let ty = expr_ty(types, &range.start.span());
+    let step = if let Some(step) = &range.step {
+        lower_expr(step, casts, types, structs, variants, fn_names, type_names)
+    } else {
+        default_step_for_ty(ty.as_ref(), type_names)
+    };
+    let mut_decl = if let Some(ty) = ty.as_ref() {
+        format!("let mut {}: {} = __start - __step;", var, ty_rust(ty, type_names))
+    } else {
+        format!("let mut {} = __start - __step;", var)
+    };
+    let cmp = if range.inclusive { "<=" } else { "<" };
+    let body_render = lower_expr(body, casts, types, structs, variants, fn_names, type_names);
+    format!(
+        "{{ let __start = {start}; let __end = {end}; let __step = {step}; {mut_decl} loop {{ {var} = {var} + __step; if !({var} {cmp} __end) {{ break; }} {body_render}; }} }}",
+        start = start,
+        end = end,
+        step = step,
+        mut_decl = mut_decl,
+        var = var,
+        cmp = cmp,
+        body_render = body_render
+    )
+}
+
+fn default_step_for_ty(ty: Option<&Ty>, type_names: &BTreeMap<String, String>) -> String {
+    if let Some(Ty::Named(name)) = ty {
+        if is_float_type(name) {
+            if name == "f32" {
+                return "1.0f32".to_string();
+            }
+            return "1.0".to_string();
+        }
+        if is_int_type(name) || is_uint_type(name) {
+            return format!("1{}", name);
+        }
+        if name == "string" {
+            return "1".to_string();
+        }
+        let rust_name = ty_rust(&Ty::Named(name.clone()), type_names);
+        return format!("1{}", rust_name);
+    }
+    "1".to_string()
+}
+
+fn is_float_type(name: &str) -> bool {
+    matches!(name, "f32" | "f64")
 }
 
 fn rust_type_name(name: &str) -> String {

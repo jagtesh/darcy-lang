@@ -16,7 +16,7 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
   - Line: `; comment`
   - Block: `#| comment |#`
 - **Strings**: double-quoted, e.g. `"hello"`. Escapes: `\\`, `\"`, `\n`, `\t`, `\r`.
-- **Reserved keywords** (cannot be used as identifiers): `defn`, `defstruct`, `defunion`, `extern`, `match`, `use`, `open`, `vec`.
+- **Reserved keywords** (cannot be used as identifiers): `defn`, `definline`, `defstruct`, `defunion`, `extern`, `match`, `if`, `loop`, `while`, `for`, `break`, `continue`, `use`, `open`, `vec`, `range`, `range-incl`.
 
 ## Literals
 
@@ -69,6 +69,40 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 
 - Parameters are symbols, optionally annotated: `x:i32`.
 - Parameter types are inferred when possible; otherwise they must be annotated.
+
+### Inline (displaced closures)
+
+```
+(definline inc [x]
+  (+ x 1))
+```
+
+- Inlines are expanded at the call site.
+- Free variables are resolved in the caller scope.
+
+### Control Flow
+
+```
+(if cond then-expr [else-expr])
+(loop expr)
+(while cond expr)
+(for i (range 0 10) expr)
+(break [expr])
+(continue)
+```
+
+- `if` without `else` returns `()`.
+- `loop`, `while`, and `for` are expressions and can `break` with a value.
+- Loop bodies are single expressions (no implicit blocks yet).
+
+### Ranges
+
+```
+(range start end [step])       ; end is exclusive
+(range-incl start end [step])  ; end is inclusive
+```
+
+- Ranges are numeric only (ints/floats).
 
 ### Extern
 
@@ -172,7 +206,11 @@ Module search paths are:
 
 - `std.io`: `dbg`
 - `core.num`: `abs`, `min`, `max`, `clamp`
-- `core.vec`: `len`, `is-empty`
+- `core.vec`: `len`, `is-empty`, `get`, `set`
+
+Notes:
+- `core.vec/get` returns the element (cloned).
+- `core.vec/set` currently clones and updates a copy, returning `()`. This will evolve when mutation/assignment is added.
 - `core.str`: `len`, `is-empty`, `trim`, `split`, `join`
 - `core.fmt`: `dbg`, `format`, `pretty`, `print`, `println`
 - `core.option`: `some`, `none`, `is-some`, `is-none`, `unwrap`, `unwrap-or`

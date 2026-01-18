@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::ast::{Expr, FnDef, MapKind, MatchPat, StructDef, Top, Ty, UnionDef, VariantDef};
+use crate::ast::{Expr, FnDef, MapKind, MatchArm, MatchPat, StructDef, Top, Ty, UnionDef, VariantDef};
 use crate::diag::{Diag, DslResult, Span};
 use crate::typed::{CastHint, SpanKey, TypedExpr, TypedFn};
 
@@ -267,8 +267,9 @@ fn infer_ty_rust(ctx: &InferCtx, ty: &InferTy) -> String {
 }
 
 pub fn typecheck_tops(tops: &[Top]) -> DslResult<TypecheckedProgram> {
+    let filtered = expand_inline_tops(tops)?;
     let mut env = TypeEnv::new();
-    for t in tops {
+    for t in &filtered {
         if let Top::Struct(sd) = t {
             env.insert_struct(sd.clone())?;
         }
@@ -279,7 +280,7 @@ pub fn typecheck_tops(tops: &[Top]) -> DslResult<TypecheckedProgram> {
 
     let mut typed_fns = Vec::new();
     let mut fn_env = FnEnv::new();
-    for t in tops {
+    for t in &filtered {
         if let Top::Func(fd) = t {
             if env.structs.contains_key(&fd.name)
                 || env.unions.contains_key(&fd.name)
@@ -303,6 +304,273 @@ pub fn typecheck_tops(tops: &[Top]) -> DslResult<TypecheckedProgram> {
     }
 
     Ok(TypecheckedProgram { env, typed_fns })
+}
+
+pub(crate) fn expand_inline_tops(tops: &[Top]) -> DslResult<Vec<Top>> {
+    let mut inline_defs: BTreeMap<String, crate::ast::InlineDef> = BTreeMap::new();
+    let mut filtered = Vec::new();
+    for t in tops {
+        match t {
+            Top::Inline(inl) => {
+                if inline_defs.contains_key(&inl.name) {
+                    return Err(Diag::new(format!("duplicate inline '{}'", inl.name))
+                        .with_span(inl.span.clone()));
+                }
+                inline_defs.insert(inl.name.clone(), inl.clone());
+            }
+            _ => filtered.push(t.clone()),
+        }
+    }
+    if inline_defs.is_empty() {
+        return Ok(filtered);
+    }
+    let mut out = Vec::new();
+    for t in filtered {
+        if let Top::Func(mut fd) = t {
+            fd.body = expand_inline_calls(&fd.body, &inline_defs)?;
+            out.push(Top::Func(fd));
+        } else {
+            out.push(t);
+        }
+    }
+    Ok(out)
+}
+
+fn expand_inline_calls(
+    expr: &Expr,
+    inline_defs: &BTreeMap<String, crate::ast::InlineDef>,
+) -> DslResult<Expr> {
+    match expr {
+        Expr::Call { op, args, span } => {
+            if let Some(inl) = inline_defs.get(op) {
+                if inl.params.len() != args.len() {
+                    return Err(
+                        Diag::new(format!(
+                            "inline '{}' expects {} arguments",
+                            inl.name,
+                            inl.params.len()
+                        ))
+                        .with_span(span.clone()),
+                    );
+                }
+                let mut map = BTreeMap::new();
+                for (param, arg) in inl.params.iter().zip(args.iter()) {
+                    map.insert(param.rust_name.clone(), arg.clone());
+                }
+                let expanded = inline_subst_local(&inl.body, &map);
+                return expand_inline_calls(&expanded, inline_defs);
+            }
+            let mut out_args = Vec::new();
+            for a in args {
+                out_args.push(expand_inline_calls(a, inline_defs)?);
+            }
+            Ok(Expr::Call {
+                op: op.clone(),
+                args: out_args,
+                span: span.clone(),
+            })
+        }
+        Expr::If { cond, then_br, else_br, span } => Ok(Expr::If {
+            cond: Box::new(expand_inline_calls(cond, inline_defs)?),
+            then_br: Box::new(expand_inline_calls(then_br, inline_defs)?),
+            else_br: match else_br {
+                Some(b) => Some(Box::new(expand_inline_calls(b, inline_defs)?)),
+                None => None,
+            },
+            span: span.clone(),
+        }),
+        Expr::Loop { body, span } => Ok(Expr::Loop {
+            body: Box::new(expand_inline_calls(body, inline_defs)?),
+            span: span.clone(),
+        }),
+        Expr::While { cond, body, span } => Ok(Expr::While {
+            cond: Box::new(expand_inline_calls(cond, inline_defs)?),
+            body: Box::new(expand_inline_calls(body, inline_defs)?),
+            span: span.clone(),
+        }),
+        Expr::For { var, range, body, span } => Ok(Expr::For {
+            var: var.clone(),
+            range: inline_subst_range_local(range, inline_defs)?,
+            body: Box::new(expand_inline_calls(body, inline_defs)?),
+            span: span.clone(),
+        }),
+        Expr::Break { value, span } => Ok(Expr::Break {
+            value: match value {
+                Some(v) => Some(Box::new(expand_inline_calls(v, inline_defs)?)),
+                None => None,
+            },
+            span: span.clone(),
+        }),
+        Expr::Pair { key, val, span } => Ok(Expr::Pair {
+            key: Box::new(expand_inline_calls(key, inline_defs)?),
+            val: Box::new(expand_inline_calls(val, inline_defs)?),
+            span: span.clone(),
+        }),
+        Expr::Field { base, field, span } => Ok(Expr::Field {
+            base: Box::new(expand_inline_calls(base, inline_defs)?),
+            field: field.clone(),
+            span: span.clone(),
+        }),
+        Expr::Match { scrutinee, arms, span } => {
+            let scrutinee = Box::new(expand_inline_calls(scrutinee, inline_defs)?);
+            let mut out_arms = Vec::new();
+            for arm in arms {
+                out_arms.push(MatchArm {
+                    pat: arm.pat.clone(),
+                    body: expand_inline_calls(&arm.body, inline_defs)?,
+                    span: arm.span.clone(),
+                });
+            }
+            Ok(Expr::Match {
+                scrutinee,
+                arms: out_arms,
+                span: span.clone(),
+            })
+        }
+        Expr::VecLit { elems, span, ann } => {
+            let mut out = Vec::new();
+            for el in elems {
+                out.push(expand_inline_calls(el, inline_defs)?);
+            }
+            Ok(Expr::VecLit {
+                elems: out,
+                span: span.clone(),
+                ann: ann.clone(),
+            })
+        }
+        Expr::MapLit { kind, entries, span, ann } => {
+            let mut out_entries = Vec::new();
+            for (k, v) in entries {
+                out_entries.push((
+                    expand_inline_calls(k, inline_defs)?,
+                    expand_inline_calls(v, inline_defs)?,
+                ));
+            }
+            Ok(Expr::MapLit {
+                kind: kind.clone(),
+                entries: out_entries,
+                span: span.clone(),
+                ann: ann.clone(),
+            })
+        }
+        Expr::Int(..)
+        | Expr::Float(..)
+        | Expr::Str(..)
+        | Expr::Var(..)
+        | Expr::Continue { .. } => Ok(expr.clone()),
+    }
+}
+
+fn inline_subst_local(expr: &Expr, map: &BTreeMap<String, Expr>) -> Expr {
+    match expr {
+        Expr::Var(name, _) => map.get(name).cloned().unwrap_or_else(|| expr.clone()),
+        Expr::Int(..) | Expr::Float(..) | Expr::Str(..) | Expr::Continue { .. } => expr.clone(),
+        Expr::Pair { key, val, span } => Expr::Pair {
+            key: Box::new(inline_subst_local(key, map)),
+            val: Box::new(inline_subst_local(val, map)),
+            span: span.clone(),
+        },
+        Expr::If { cond, then_br, else_br, span } => Expr::If {
+            cond: Box::new(inline_subst_local(cond, map)),
+            then_br: Box::new(inline_subst_local(then_br, map)),
+            else_br: else_br.as_ref().map(|b| Box::new(inline_subst_local(b, map))),
+            span: span.clone(),
+        },
+        Expr::Loop { body, span } => Expr::Loop {
+            body: Box::new(inline_subst_local(body, map)),
+            span: span.clone(),
+        },
+        Expr::While { cond, body, span } => Expr::While {
+            cond: Box::new(inline_subst_local(cond, map)),
+            body: Box::new(inline_subst_local(body, map)),
+            span: span.clone(),
+        },
+        Expr::For { var, range, body, span } => Expr::For {
+            var: var.clone(),
+            range: inline_subst_range(map, range),
+            body: Box::new(inline_subst_local(body, map)),
+            span: span.clone(),
+        },
+        Expr::Break { value, span } => Expr::Break {
+            value: value.as_ref().map(|v| Box::new(inline_subst_local(v, map))),
+            span: span.clone(),
+        },
+        Expr::Field { base, field, span } => Expr::Field {
+            base: Box::new(inline_subst_local(base, map)),
+            field: field.clone(),
+            span: span.clone(),
+        },
+        Expr::Match { scrutinee, arms, span } => {
+            let scrutinee = Box::new(inline_subst_local(scrutinee, map));
+            let mut out_arms = Vec::new();
+            for arm in arms {
+                out_arms.push(MatchArm {
+                    pat: arm.pat.clone(),
+                    body: inline_subst_local(&arm.body, map),
+                    span: arm.span.clone(),
+                });
+            }
+            Expr::Match {
+                scrutinee,
+                arms: out_arms,
+                span: span.clone(),
+            }
+        }
+        Expr::Call { op, args, span } => Expr::Call {
+            op: op.clone(),
+            args: args.iter().map(|a| inline_subst_local(a, map)).collect(),
+            span: span.clone(),
+        },
+        Expr::VecLit { elems, span, ann } => Expr::VecLit {
+            elems: elems.iter().map(|e| inline_subst_local(e, map)).collect(),
+            span: span.clone(),
+            ann: ann.clone(),
+        },
+        Expr::MapLit { kind, entries, span, ann } => {
+            let entries = entries
+                .iter()
+                .map(|(k, v)| (inline_subst_local(k, map), inline_subst_local(v, map)))
+                .collect();
+            Expr::MapLit {
+                kind: kind.clone(),
+                entries,
+                span: span.clone(),
+                ann: ann.clone(),
+            }
+        }
+    }
+}
+
+fn inline_subst_range(
+    map: &BTreeMap<String, Expr>,
+    range: &crate::ast::RangeExpr,
+) -> crate::ast::RangeExpr {
+    crate::ast::RangeExpr {
+        start: Box::new(inline_subst_local(&range.start, map)),
+        end: Box::new(inline_subst_local(&range.end, map)),
+        step: range.step.as_ref().map(|s| Box::new(inline_subst_local(s, map))),
+        inclusive: range.inclusive,
+        span: range.span.clone(),
+    }
+}
+
+fn inline_subst_range_local(
+    range: &crate::ast::RangeExpr,
+    inline_defs: &BTreeMap<String, crate::ast::InlineDef>,
+) -> DslResult<crate::ast::RangeExpr> {
+    let start = expand_inline_calls(&range.start, inline_defs)?;
+    let end = expand_inline_calls(&range.end, inline_defs)?;
+    let step = match &range.step {
+        Some(s) => Some(Box::new(expand_inline_calls(s, inline_defs)?)),
+        None => None,
+    };
+    Ok(crate::ast::RangeExpr {
+        start: Box::new(start),
+        end: Box::new(end),
+        step,
+        inclusive: range.inclusive,
+        span: range.span.clone(),
+    })
 }
 
 pub fn typecheck_fn(env: &TypeEnv, fns: &FnEnv, f: &FnDef) -> DslResult<TypedFn> {
@@ -522,11 +790,29 @@ fn fmt_set(s: &BTreeSet<String>) -> String {
     format!("{{{}}}", v.join(", "))
 }
 
+#[derive(Debug, Clone)]
+struct LoopFrame {
+    result_ty: InferTy,
+    saw_break: bool,
+}
+
 fn infer_expr_type(
     env: &TypeEnv,
     fns: &FnEnv,
     ctx: &mut InferCtx,
     vars: &BTreeMap<String, InferTy>,
+    e: &Expr,
+) -> DslResult<InferExpr> {
+    let mut loop_stack = Vec::new();
+    infer_expr_type_internal(env, fns, ctx, vars, &mut loop_stack, e)
+}
+
+fn infer_expr_type_internal(
+    env: &TypeEnv,
+    fns: &FnEnv,
+    ctx: &mut InferCtx,
+    vars: &BTreeMap<String, InferTy>,
+    loop_stack: &mut Vec<LoopFrame>,
     e: &Expr,
 ) -> DslResult<InferExpr> {
     match e {
@@ -582,7 +868,7 @@ fn infer_expr_type(
             let mut types = BTreeMap::new();
             let mut elem_tys = Vec::new();
             for el in elems {
-                let te = infer_expr_type(env, fns, ctx, vars, el)?;
+                let te = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, el)?;
                 casts.extend(te.casts.clone());
                 types.extend(te.types);
                 elem_tys.push((te.ty, el.span()));
@@ -625,6 +911,190 @@ fn infer_expr_type(
                 types,
             })
         }
+        Expr::If {
+            cond,
+            then_br,
+            else_br,
+            span,
+        } => {
+            let mut casts = Vec::new();
+            let mut types = BTreeMap::new();
+            let tcond = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, cond)?;
+            casts.extend(tcond.casts.clone());
+            types.extend(tcond.types.clone());
+            let bool_ty = InferTy::Named("bool".to_string());
+            ctx.unify(&tcond.ty, &bool_ty, &cond.span())?;
+
+            let tthen = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, then_br)?;
+            casts.extend(tthen.casts.clone());
+            types.extend(tthen.types.clone());
+
+            let out_ty = if let Some(else_br) = else_br {
+                let telse = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, else_br)?;
+                casts.extend(telse.casts.clone());
+                types.extend(telse.types.clone());
+                ctx.unify(&tthen.ty, &telse.ty, &else_br.span())?;
+                ctx.resolve(&tthen.ty)
+            } else {
+                InferTy::Named("()".to_string())
+            };
+
+            types.insert(SpanKey::new(span), out_ty.clone());
+            Ok(InferExpr {
+                expr: e.clone(),
+                ty: out_ty,
+                casts,
+                types,
+            })
+        }
+        Expr::Loop { body, span } => {
+            let mut casts = Vec::new();
+            let mut types = BTreeMap::new();
+            let result_ty = ctx.fresh_var();
+            loop_stack.push(LoopFrame {
+                result_ty: result_ty.clone(),
+                saw_break: false,
+            });
+            let tbody = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, body)?;
+            casts.extend(tbody.casts.clone());
+            types.extend(tbody.types.clone());
+            let frame = loop_stack.pop().expect("loop frame");
+            let out_ty = if frame.saw_break {
+                ctx.resolve(&frame.result_ty)
+            } else {
+                InferTy::Named("()".to_string())
+            };
+            types.insert(SpanKey::new(span), out_ty.clone());
+            Ok(InferExpr {
+                expr: e.clone(),
+                ty: out_ty,
+                casts,
+                types,
+            })
+        }
+        Expr::While { cond, body, span } => {
+            let mut casts = Vec::new();
+            let mut types = BTreeMap::new();
+            let tcond = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, cond)?;
+            casts.extend(tcond.casts.clone());
+            types.extend(tcond.types.clone());
+            let bool_ty = InferTy::Named("bool".to_string());
+            ctx.unify(&tcond.ty, &bool_ty, &cond.span())?;
+
+            let result_ty = ctx.fresh_var();
+            loop_stack.push(LoopFrame {
+                result_ty: result_ty.clone(),
+                saw_break: false,
+            });
+            let tbody = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, body)?;
+            casts.extend(tbody.casts.clone());
+            types.extend(tbody.types.clone());
+            let frame = loop_stack.pop().expect("loop frame");
+            let out_ty = if frame.saw_break {
+                ctx.resolve(&frame.result_ty)
+            } else {
+                InferTy::Named("()".to_string())
+            };
+            types.insert(SpanKey::new(span), out_ty.clone());
+            Ok(InferExpr {
+                expr: e.clone(),
+                ty: out_ty,
+                casts,
+                types,
+            })
+        }
+        Expr::For { var, range, body, span } => {
+            let mut casts = Vec::new();
+            let mut types = BTreeMap::new();
+            let tstart = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, &range.start)?;
+            let tend = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, &range.end)?;
+            casts.extend(tstart.casts.clone());
+            casts.extend(tend.casts.clone());
+            types.extend(tstart.types.clone());
+            types.extend(tend.types.clone());
+            ctx.unify(&tstart.ty, &tend.ty, &range.end.span())?;
+            let mut elem_ty = ctx.resolve(&tstart.ty);
+            if let Some(step) = &range.step {
+                let tstep = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, step)?;
+                casts.extend(tstep.casts.clone());
+                types.extend(tstep.types.clone());
+                ctx.unify(&elem_ty, &tstep.ty, &step.span())?;
+                elem_ty = ctx.resolve(&elem_ty);
+            }
+            let elem_resolved = infer_to_ty(ctx, &elem_ty)
+                .ok_or_else(|| Diag::new("cannot infer range element type").with_span(range.span.clone()))?;
+            if !is_numeric(&elem_resolved) {
+                return Err(Diag::new("range bounds must be numeric").with_span(range.span.clone()));
+            }
+
+            let mut body_vars = vars.clone();
+            body_vars.insert(var.clone(), elem_ty.clone());
+            let result_ty = ctx.fresh_var();
+            loop_stack.push(LoopFrame {
+                result_ty: result_ty.clone(),
+                saw_break: false,
+            });
+            let tbody = infer_expr_type_internal(env, fns, ctx, &body_vars, loop_stack, body)?;
+            casts.extend(tbody.casts.clone());
+            types.extend(tbody.types.clone());
+            let frame = loop_stack.pop().expect("loop frame");
+            let out_ty = if frame.saw_break {
+                ctx.resolve(&frame.result_ty)
+            } else {
+                InferTy::Named("()".to_string())
+            };
+            types.insert(SpanKey::new(span), out_ty.clone());
+            Ok(InferExpr {
+                expr: e.clone(),
+                ty: out_ty,
+                casts,
+                types,
+            })
+        }
+        Expr::Break { value, span } => {
+            if loop_stack.is_empty() {
+                return Err(
+                    Diag::new("break is only allowed inside loops").with_span(span.clone())
+                );
+            }
+            let frame_idx = loop_stack.len() - 1;
+            let result_ty = loop_stack[frame_idx].result_ty.clone();
+            let mut casts = Vec::new();
+            let mut types = BTreeMap::new();
+            let value_ty = if let Some(v) = value {
+                let tv = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, v)?;
+                casts.extend(tv.casts.clone());
+                types.extend(tv.types.clone());
+                tv.ty
+            } else {
+                InferTy::Named("()".to_string())
+            };
+            ctx.unify(&result_ty, &value_ty, span)?;
+            loop_stack[frame_idx].saw_break = true;
+            types.insert(SpanKey::new(span), result_ty.clone());
+            Ok(InferExpr {
+                expr: e.clone(),
+                ty: result_ty.clone(),
+                casts,
+                types,
+            })
+        }
+        Expr::Continue { span } => {
+            if loop_stack.is_empty() {
+                return Err(
+                    Diag::new("continue is only allowed inside loops").with_span(span.clone())
+                );
+            }
+            let out_ty = InferTy::Named("()".to_string());
+            let mut types = BTreeMap::new();
+            types.insert(SpanKey::new(span), out_ty.clone());
+            Ok(InferExpr {
+                expr: e.clone(),
+                ty: out_ty,
+                casts: vec![],
+                types,
+            })
+        }
         Expr::Pair { span, .. } => {
             Err(Diag::new("pair literal is only allowed inside hashmap/new or btreemap/new")
                 .with_span(span.clone()))
@@ -653,8 +1123,8 @@ fn infer_expr_type(
             }
 
             for (k, v) in entries {
-                let tk = infer_expr_type(env, fns, ctx, vars, k)?;
-                let tv = infer_expr_type(env, fns, ctx, vars, v)?;
+                let tk = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, k)?;
+                let tv = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, v)?;
                 casts.extend(tk.casts.clone());
                 casts.extend(tv.casts.clone());
                 types.extend(tk.types);
@@ -684,7 +1154,7 @@ fn infer_expr_type(
             })
         }
         Expr::Field { base, field, span } => {
-            let tb = infer_expr_type(env, fns, ctx, vars, base)?;
+            let tb = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, base)?;
             let base_ty = ctx.resolve(&tb.ty);
             let (struct_name, is_vec) = match base_ty {
                 InferTy::Named(n) => (n, false),
@@ -743,7 +1213,7 @@ fn infer_expr_type(
             })
         }
         Expr::Match { scrutinee, arms, span } => {
-            let scrut = infer_expr_type(env, fns, ctx, vars, scrutinee)?;
+            let scrut = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, scrutinee)?;
             let union_name = match ctx.resolve(&scrut.ty) {
                 InferTy::Named(n) => n,
                 InferTy::Var(_) => {
@@ -807,7 +1277,7 @@ fn infer_expr_type(
                     }
                 }
 
-                let tarm = infer_expr_type(env, fns, ctx, &arm_vars, &arm.body)?;
+                let tarm = infer_expr_type_internal(env, fns, ctx, &arm_vars, loop_stack, &arm.body)?;
                 casts.extend(tarm.casts.clone());
                 types.extend(tarm.types.clone());
                 if let Some(current) = &out_ty {
@@ -869,8 +1339,8 @@ fn infer_expr_type(
                             )
                         }
                     };
-                    let tk = infer_expr_type(env, fns, ctx, vars, key)?;
-                    let tv = infer_expr_type(env, fns, ctx, vars, val)?;
+                    let tk = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, key)?;
+                    let tv = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, val)?;
                     casts.extend(tk.casts.clone());
                     casts.extend(tv.casts.clone());
                     types.extend(tk.types);
@@ -904,7 +1374,7 @@ fn infer_expr_type(
             let mut casts = Vec::new();
             let mut types = BTreeMap::new();
             for a in args {
-                let ta = infer_expr_type(env, fns, ctx, vars, a)?;
+                let ta = infer_expr_type_internal(env, fns, ctx, vars, loop_stack, a)?;
                 casts.extend(ta.casts.clone());
                 types.extend(ta.types.clone());
                 targs.push(ta);
@@ -1031,6 +1501,37 @@ fn infer_expr_type(
                     }
                     let _elem = ensure_vec_arg(ctx, &targs[0].ty, &args[0].span())?;
                     let out_ty = InferTy::Named("bool".to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.vec/get" => {
+                    if targs.len() != 2 {
+                        return Err(Diag::new("'get' expects 2 arguments").with_span(span.clone()));
+                    }
+                    let elem = ensure_vec_arg(ctx, &targs[0].ty, &args[0].span())?;
+                    ensure_index_arg(ctx, &targs[1].ty, &args[1].span())?;
+                    let out_ty = elem;
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "core.vec/set" => {
+                    if targs.len() != 3 {
+                        return Err(Diag::new("'set' expects 3 arguments").with_span(span.clone()));
+                    }
+                    let elem = ensure_vec_arg(ctx, &targs[0].ty, &args[0].span())?;
+                    ensure_index_arg(ctx, &targs[1].ty, &args[1].span())?;
+                    ctx.unify(&elem, &targs[2].ty, &args[2].span())?;
+                    let out_ty = InferTy::Named("()".to_string());
                     types.insert(SpanKey::new(span), out_ty.clone());
                     Ok(InferExpr {
                         expr: e.clone(),
@@ -1511,6 +2012,34 @@ fn ensure_vec_arg(ctx: &mut InferCtx, ty: &InferTy, span: &Span) -> DslResult<In
             Err(Diag::new("expected vector type").with_span(span.clone()))
         }
     }
+}
+
+fn ensure_index_arg(ctx: &mut InferCtx, ty: &InferTy, span: &Span) -> DslResult<()> {
+    let resolved = ctx.resolve(ty);
+    match resolved {
+        InferTy::Named(name) => {
+            if is_integer_name(&name) {
+                Ok(())
+            } else {
+                Err(Diag::new("index must be an integer").with_span(span.clone()))
+            }
+        }
+        InferTy::Var(_) => {
+            let int_ty = InferTy::Named("i32".to_string());
+            ctx.unify(&resolved, &int_ty, span)?;
+            Ok(())
+        }
+        InferTy::Vec(_) | InferTy::Option(_) | InferTy::Result(_, _) | InferTy::Map(_, _, _) => {
+            Err(Diag::new("index must be an integer").with_span(span.clone()))
+        }
+    }
+}
+
+fn is_integer_name(name: &str) -> bool {
+    matches!(
+        name,
+        "i8" | "i16" | "i32" | "i64" | "isize" | "u8" | "u16" | "u32" | "u64" | "usize"
+    )
 }
 
 fn ensure_string_arg(ctx: &mut InferCtx, ty: &InferTy, span: &Span) -> DslResult<()> {

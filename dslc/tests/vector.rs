@@ -20,3 +20,19 @@ fn rejects_vector_scalar_mismatch() {
     let err = compile(src).expect_err("expected type error");
     assert!(err.message.contains("vector-scalar"), "{}", err.message);
 }
+
+#[test]
+fn vec_get_lowers() {
+    let src = "(defn main [v:vec<i32>] (core.vec/get v 0))";
+    let out = compile(src).expect("compile ok");
+    assert!(out.contains("as usize"), "{}", out);
+    assert!(out.contains(".clone()"), "{}", out);
+}
+
+#[test]
+fn vec_set_lowers() {
+    let src = "(defn main [v:vec<i32>] (core.vec/set v 0 1))";
+    let out = compile(src).expect("compile ok");
+    assert!(out.contains("let mut __v"), "{}", out);
+    assert!(out.contains("as usize"), "{}", out);
+}

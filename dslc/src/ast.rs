@@ -95,6 +95,34 @@ pub enum Expr {
         val: Box<Expr>,
         span: Span,
     },
+    If {
+        cond: Box<Expr>,
+        then_br: Box<Expr>,
+        else_br: Option<Box<Expr>>,
+        span: Span,
+    },
+    Loop {
+        body: Box<Expr>,
+        span: Span,
+    },
+    While {
+        cond: Box<Expr>,
+        body: Box<Expr>,
+        span: Span,
+    },
+    For {
+        var: String,
+        range: RangeExpr,
+        body: Box<Expr>,
+        span: Span,
+    },
+    Break {
+        value: Option<Box<Expr>>,
+        span: Span,
+    },
+    Continue {
+        span: Span,
+    },
     Field {
         base: Box<Expr>,
         field: String,
@@ -127,12 +155,27 @@ impl Expr {
             Expr::Var(_, s) => s.clone(),
             Expr::VecLit { span, .. } => span.clone(),
             Expr::Pair { span, .. } => span.clone(),
+            Expr::If { span, .. } => span.clone(),
+            Expr::Loop { span, .. } => span.clone(),
+            Expr::While { span, .. } => span.clone(),
+            Expr::For { span, .. } => span.clone(),
+            Expr::Break { span, .. } => span.clone(),
+            Expr::Continue { span, .. } => span.clone(),
             Expr::Field { span, .. } => span.clone(),
             Expr::Match { span, .. } => span.clone(),
             Expr::Call { span, .. } => span.clone(),
             Expr::MapLit { span, .. } => span.clone(),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct RangeExpr {
+    pub start: Box<Expr>,
+    pub end: Box<Expr>,
+    pub step: Option<Box<Expr>>,
+    pub inclusive: bool,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -147,10 +190,20 @@ pub struct FnDef {
 }
 
 #[derive(Debug, Clone)]
+pub struct InlineDef {
+    pub name: String,
+    pub rust_name: String,
+    pub params: Vec<Param>,
+    pub body: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
 pub enum Top {
     Struct(StructDef),
     Union(UnionDef),
     Func(FnDef),
+    Inline(InlineDef),
     Use(UseDecl),
 }
 
@@ -271,14 +324,9 @@ fn is_primitive_type(name: &str) -> bool {
 }
 
 fn is_module_path(prefix: &str) -> bool {
-    for seg in prefix.split('/') {
-        if seg.is_empty() {
+    for part in prefix.split('.') {
+        if part.is_empty() || !is_lisp_ident(part) {
             return false;
-        }
-        for part in seg.split('.') {
-            if part.is_empty() || !is_lisp_ident(part) {
-                return false;
-            }
         }
     }
     true
@@ -403,13 +451,22 @@ fn is_reserved_ident(name: &str) -> bool {
     matches!(
         name,
         "defn"
+            | "definline"
             | "defstruct"
             | "defunion"
             | "extern"
             | "match"
+            | "if"
+            | "loop"
+            | "while"
+            | "for"
+            | "break"
+            | "continue"
             | "use"
             | "open"
             | "vec"
+            | "range"
+            | "range-incl"
     )
 }
 
@@ -655,6 +712,86 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                     );
                 }
             };
+            if op == "if" {
+                if items.len() < 3 || items.len() > 4 {
+                    return Err(Diag::new("if form is (if cond then [else])").with_span(op_span));
+                }
+                let cond = parse_expr(&items[1])?;
+                let then_br = parse_expr(&items[2])?;
+                let else_br = if items.len() == 4 {
+                    Some(Box::new(parse_expr(&items[3])?))
+                } else {
+                    None
+                };
+                return Ok(Expr::If {
+                    cond: Box::new(cond),
+                    then_br: Box::new(then_br),
+                    else_br,
+                    span: span.clone(),
+                });
+            }
+            if op == "loop" {
+                if items.len() != 2 {
+                    return Err(Diag::new("loop form is (loop expr)").with_span(op_span));
+                }
+                let body = parse_expr(&items[1])?;
+                return Ok(Expr::Loop {
+                    body: Box::new(body),
+                    span: span.clone(),
+                });
+            }
+            if op == "while" {
+                if items.len() != 3 {
+                    return Err(Diag::new("while form is (while cond expr)").with_span(op_span));
+                }
+                let cond = parse_expr(&items[1])?;
+                let body = parse_expr(&items[2])?;
+                return Ok(Expr::While {
+                    cond: Box::new(cond),
+                    body: Box::new(body),
+                    span: span.clone(),
+                });
+            }
+            if op == "for" {
+                if items.len() != 4 {
+                    return Err(
+                        Diag::new("for form is (for name (range start end [step]) expr)")
+                            .with_span(op_span),
+                    );
+                }
+                let (name, sp) = atom_sym(&items[1]).ok_or_else(|| {
+                    Diag::new("for binding must be a symbol").with_span(se_span(&items[1]))
+                })?;
+                let name = ensure_lisp_ident(&name, &sp, "for binding")?;
+                let range = parse_range_expr(&items[2])?;
+                let body = parse_expr(&items[3])?;
+                return Ok(Expr::For {
+                    var: rust_value_name(&name),
+                    range,
+                    body: Box::new(body),
+                    span: span.clone(),
+                });
+            }
+            if op == "break" {
+                if items.len() > 2 {
+                    return Err(Diag::new("break form is (break [expr])").with_span(op_span));
+                }
+                let value = if items.len() == 2 {
+                    Some(Box::new(parse_expr(&items[1])?))
+                } else {
+                    None
+                };
+                return Ok(Expr::Break {
+                    value,
+                    span: span.clone(),
+                });
+            }
+            if op == "continue" {
+                if items.len() != 1 {
+                    return Err(Diag::new("continue form is (continue)").with_span(op_span));
+                }
+                return Ok(Expr::Continue { span: span.clone() });
+            }
             if op.starts_with("core.hashmap/new") || op.starts_with("core.btreemap/new") {
                 let (kind, ann) = if let Some(inner) = op.strip_prefix("core.hashmap/new<") {
                     let inner = inner.strip_suffix('>').ok_or_else(|| {
@@ -759,6 +896,44 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
             })
         }
     }
+}
+
+fn parse_range_expr(se: &Sexp) -> DslResult<RangeExpr> {
+    let (items, span) = match se {
+        Sexp::List(v, sp) => (v, sp),
+        _ => return Err(Diag::new("range form must be a list").with_span(se_span(se))),
+    };
+    if items.is_empty() {
+        return Err(Diag::new("range form is (range start end [step])").with_span(span.clone()));
+    }
+    let (head, head_sp) = atom_sym(&items[0])
+        .ok_or_else(|| Diag::new("range head must be a symbol").with_span(se_span(&items[0])))?;
+    let inclusive = match head.as_str() {
+        "range" => false,
+        "range-incl" => true,
+        _ => {
+            return Err(
+                Diag::new("for expects (range ...) or (range-incl ...)").with_span(head_sp)
+            )
+        }
+    };
+    if items.len() < 3 || items.len() > 4 {
+        return Err(Diag::new("range form is (range start end [step])").with_span(head_sp));
+    }
+    let start = parse_expr(&items[1])?;
+    let end = parse_expr(&items[2])?;
+    let step = if items.len() == 4 {
+        Some(Box::new(parse_expr(&items[3])?))
+    } else {
+        None
+    };
+    Ok(RangeExpr {
+        start: Box::new(start),
+        end: Box::new(end),
+        step,
+        inclusive,
+        span: span.clone(),
+    })
 }
 
 fn parse_match(span: &Span, items: &[Sexp]) -> DslResult<Expr> {
@@ -873,6 +1048,36 @@ pub fn parse_fn(se: &Sexp) -> DslResult<FnDef> {
         },
         extern_: false,
         extern_ret: None,
+    })
+}
+
+pub fn parse_inline(se: &Sexp) -> DslResult<InlineDef> {
+    let (items, span) = match se {
+        Sexp::List(items, span) => (items, span.clone()),
+        _ => return Err(Diag::new("expected (definline ...)").with_span(se_span(se))),
+    };
+    if items.len() != 4 {
+        return Err(Diag::new("definline form is (definline name [params] body)").with_span(span));
+    }
+    let (head, _) = atom_sym(&items[0])
+        .ok_or_else(|| Diag::new("expected symbol 'definline'").with_span(se_span(&items[0])))?;
+    if head != "definline" {
+        return Err(Diag::new("expected 'definline'").with_span(se_span(&items[0])));
+    }
+    let (name, name_sp) = atom_sym(&items[1])
+        .ok_or_else(|| Diag::new("expected inline function name").with_span(se_span(&items[1])))?;
+    let name = ensure_lisp_ident(&name, &name_sp, "inline function name")?;
+    let params = parse_params(&items[2])?;
+    let body = parse_expr(&items[3])?;
+    Ok(InlineDef {
+        name: name.clone(),
+        rust_name: rust_value_name(&name),
+        params,
+        body,
+        span: Span {
+            start: name_sp.start,
+            end: span.end,
+        },
     })
 }
 
@@ -995,6 +1200,7 @@ pub fn parse_toplevel(sexps: &[Sexp]) -> DslResult<Vec<Top>> {
             "defstruct" => out.push(Top::Struct(parse_struct(se)?)),
             "defunion" => out.push(Top::Union(parse_union(se)?)),
             "defn" => out.push(Top::Func(parse_fn(se)?)),
+            "definline" => out.push(Top::Inline(parse_inline(se)?)),
             _ => {
                 return Err(Diag::new(format!("unknown top-level form '{}'", head))
                     .with_span(se_span(&items[0])));

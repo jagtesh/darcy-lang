@@ -32,3 +32,25 @@ fn rejects_unconstrained_param() {
         err.message
     );
 }
+
+#[test]
+fn rejects_break_outside_loop() {
+    let src = "(defn main [] (break))";
+    let err = compile(src).expect_err("expected type error");
+    assert!(
+        err.message.contains("break is only allowed inside loops"),
+        "unexpected error: {}",
+        err.message
+    );
+}
+
+#[test]
+fn rejects_continue_outside_loop() {
+    let src = "(defn main [] (continue))";
+    let err = compile(src).expect_err("expected type error");
+    assert!(
+        err.message.contains("continue is only allowed inside loops"),
+        "unexpected error: {}",
+        err.message
+    );
+}
