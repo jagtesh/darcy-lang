@@ -90,6 +90,9 @@ pub enum Expr {
     Int(i64, Span),
     Float(f64, Span),
     Str(String, Span),
+    Bool(bool, Span),
+    Unit(Span),
+    Keyword(String, Span),
     Var(String, Span),
     VecLit {
         elems: Vec<Expr>,
@@ -177,6 +180,9 @@ impl Expr {
             Expr::Int(_, s) => s.clone(),
             Expr::Float(_, s) => s.clone(),
             Expr::Str(_, s) => s.clone(),
+            Expr::Bool(_, s) => s.clone(),
+            Expr::Unit(s) => s.clone(),
+            Expr::Keyword(_, s) => s.clone(),
             Expr::Var(_, s) => s.clone(),
             Expr::VecLit { span, .. } => span.clone(),
             Expr::Pair { span, .. } => span.clone(),
@@ -502,9 +508,12 @@ fn is_reserved_ident(name: &str) -> bool {
             | "defn"
             | "defin"
             | "defstruct"
+            | "defrecord"
             | "defunion"
+            | "defenum"
             | "extern"
             | "match"
+            | "case"
             | "if"
             | "do"
             | "loop"
@@ -516,10 +525,14 @@ fn is_reserved_ident(name: &str) -> bool {
             | "fn"
             | "call"
             | "use"
+            | "require"
             | "open"
             | "vec"
             | "range"
             | "range-incl"
+            | "true"
+            | "false"
+            | "nil"
     )
 }
 
@@ -553,9 +566,9 @@ pub fn parse_struct(se: &Sexp) -> DslResult<StructDef> {
         return Err(Diag::new("defstruct requires a name").with_span(span));
     }
     let (head, _) = atom_sym(&items[0])
-        .ok_or_else(|| Diag::new("expected symbol 'defstruct'").with_span(se_span(&items[0])))?;
-    if head != "defstruct" {
-        return Err(Diag::new("expected 'defstruct'").with_span(se_span(&items[0])));
+        .ok_or_else(|| Diag::new("expected symbol 'defstruct' or 'defrecord'").with_span(se_span(&items[0])))?;
+    if head != "defstruct" && head != "defrecord" {
+        return Err(Diag::new("expected 'defstruct' or 'defrecord'").with_span(se_span(&items[0])));
     }
     let (name, name_sp) = atom_sym(&items[1])
         .ok_or_else(|| Diag::new("expected struct name").with_span(se_span(&items[1])))?;
@@ -613,9 +626,9 @@ pub fn parse_union(se: &Sexp) -> DslResult<UnionDef> {
         return Err(Diag::new("defunion requires a name").with_span(span));
     }
     let (head, _) = atom_sym(&items[0])
-        .ok_or_else(|| Diag::new("expected symbol 'defunion'").with_span(se_span(&items[0])))?;
-    if head != "defunion" {
-        return Err(Diag::new("expected 'defunion'").with_span(se_span(&items[0])));
+        .ok_or_else(|| Diag::new("expected symbol 'defunion' or 'defenum'").with_span(se_span(&items[0])))?;
+    if head != "defunion" && head != "defenum" {
+        return Err(Diag::new("expected 'defunion' or 'defenum'").with_span(se_span(&items[0])));
     }
     let (name, name_sp) = atom_sym(&items[1])
         .ok_or_else(|| Diag::new("expected union name").with_span(se_span(&items[1])))?;
@@ -731,6 +744,12 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
         Sexp::Atom(TokKind::Int(v), sp) => Ok(Expr::Int(*v, sp.clone())),
         Sexp::Atom(TokKind::Float(v), sp) => Ok(Expr::Float(*v, sp.clone())),
         Sexp::Atom(TokKind::Str(s), sp) => Ok(Expr::Str(s.clone(), sp.clone())),
+        Sexp::Atom(TokKind::Sym(s), sp) if s == "true" => Ok(Expr::Bool(true, sp.clone())),
+        Sexp::Atom(TokKind::Sym(s), sp) if s == "false" => Ok(Expr::Bool(false, sp.clone())),
+        Sexp::Atom(TokKind::Sym(s), sp) if s == "nil" => Ok(Expr::Unit(sp.clone())),
+        Sexp::Atom(TokKind::Sym(s), sp) if s.starts_with(':') && s.len() > 1 => {
+            Ok(Expr::Keyword(s.clone(), sp.clone()))
+        }
         Sexp::Atom(TokKind::Sym(s), sp) => {
             if s.contains('/') {
                 return Err(Diag::new("qualified name is only allowed in call heads")
@@ -754,6 +773,25 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
             Diag::new(format!("unexpected token {:?} where expression expected", k))
                 .with_span(sp.clone()),
         ),
+        Sexp::Brace(items, span) => {
+            if items.len() % 2 != 0 {
+                return Err(Diag::new("map literal must have even number of forms").with_span(span.clone()));
+            }
+            let mut entries = Vec::new();
+            let mut idx = 0usize;
+            while idx < items.len() {
+                let key = parse_expr(&items[idx])?;
+                let val = parse_expr(&items[idx + 1])?;
+                entries.push((key, val));
+                idx += 2;
+            }
+            return Ok(Expr::MapLit {
+                kind: MapKind::Hash,
+                entries,
+                span: span.clone(),
+                ann: None,
+            });
+        }
         Sexp::List(items, span) => {
             if items.is_empty() {
                 return Err(
@@ -920,7 +958,7 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                     ann,
                 });
             }
-            if op == "match" {
+            if op == "match" || op == "case" {
                 return parse_match(span, &items[1..]);
             }
             if op == "let" {
@@ -1337,7 +1375,7 @@ fn parse_extern_toplevel(se: &Sexp) -> DslResult<Top> {
     let (head, _) = atom_sym(&fitems[0])
         .ok_or_else(|| Diag::new("extern form head must be a symbol").with_span(se_span(&fitems[0])))?;
     match head.as_str() {
-        "defstruct" => {
+        "defstruct" | "defrecord" => {
             let mut sd = parse_struct(form)?;
             sd.extern_ = true;
             if let Some(rust) = override_name {
@@ -1345,7 +1383,7 @@ fn parse_extern_toplevel(se: &Sexp) -> DslResult<Top> {
             }
             Ok(Top::Struct(sd))
         }
-        "defunion" => {
+        "defunion" | "defenum" => {
             let mut ud = parse_union(form)?;
             ud.extern_ = true;
             if let Some(rust) = override_name {
@@ -1398,6 +1436,7 @@ fn se_span(se: &Sexp) -> Span {
         Sexp::Atom(_, sp) => sp.clone(),
         Sexp::List(_, sp) => sp.clone(),
         Sexp::Brack(_, sp) => sp.clone(),
+        Sexp::Brace(_, sp) => sp.clone(),
     }
 }
 
@@ -1418,11 +1457,11 @@ pub fn parse_toplevel(sexps: &[Sexp]) -> DslResult<Vec<Top>> {
         let (head, _) = atom_sym(&items[0])
             .ok_or_else(|| Diag::new("top-level head must be a symbol").with_span(se_span(&items[0])))?;
         match head.as_str() {
-            "use" => out.push(Top::Use(parse_use_decl(&items[1..], &span, false)?)),
+            "use" | "require" => out.push(Top::Use(parse_use_decl(&items[1..], &span, false)?)),
             "open" => out.push(Top::Use(parse_use_decl(&items[1..], &span, true)?)),
             "extern" => out.push(parse_extern_toplevel(se)?),
-            "defstruct" => out.push(Top::Struct(parse_struct(se)?)),
-            "defunion" => out.push(Top::Union(parse_union(se)?)),
+            "defstruct" | "defrecord" => out.push(Top::Struct(parse_struct(se)?)),
+            "defunion" | "defenum" => out.push(Top::Union(parse_union(se)?)),
             "defn" => out.push(Top::Func(parse_fn(se)?)),
             "defin" => out.push(Top::Inline(parse_inline(se)?)),
             "def" => out.push(Top::Def(parse_def(se)?)),

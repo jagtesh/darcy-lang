@@ -550,7 +550,13 @@ fn resolve_inline_def(res: &Resolver, op: &str, span: &Span) -> DslResult<Option
 fn inline_subst(expr: &Expr, map: &BTreeMap<String, Expr>) -> Expr {
     match expr {
         Expr::Var(name, _) => map.get(name).cloned().unwrap_or_else(|| expr.clone()),
-        Expr::Int(..) | Expr::Float(..) | Expr::Str(..) | Expr::Continue { .. } => expr.clone(),
+        Expr::Int(..)
+        | Expr::Float(..)
+        | Expr::Str(..)
+        | Expr::Bool(..)
+        | Expr::Unit(..)
+        | Expr::Keyword(..)
+        | Expr::Continue { .. } => expr.clone(),
         Expr::Pair { key, val, span } => Expr::Pair {
             key: Box::new(inline_subst(key, map)),
             val: Box::new(inline_subst(val, map)),

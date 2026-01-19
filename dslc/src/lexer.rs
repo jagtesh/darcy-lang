@@ -6,6 +6,8 @@ pub enum TokKind {
     RParen,
     LBrack,
     RBrack,
+    LBrace,
+    RBrace,
     Sym(String),
     Str(String),
     Int(i64),
@@ -109,6 +111,16 @@ pub fn lex(input: &str) -> DslResult<Vec<Tok>> {
                 i += 1;
                 col += 1;
                 TokKind::RBrack
+            }
+            '{' => {
+                i += 1;
+                col += 1;
+                TokKind::LBrace
+            }
+            '}' => {
+                i += 1;
+                col += 1;
+                TokKind::RBrace
             }
             '"' => {
                 i += 1;

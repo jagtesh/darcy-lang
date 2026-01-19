@@ -44,25 +44,25 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 
 ## Top-Level Forms
 
-### Structs
+### Structs (Records)
 
 ```
-(defstruct order
+(defrecord order
   (qty u32)
   (price f64))
 ```
 
-- Field types can be omitted when inferable: `(defstruct order (qty) (price))`.
+- Field types can be omitted when inferable: `(defrecord order (qty) (price))`.
 
 ### Unions (discriminated unions)
 
 ```
-(defunion result
+(defenum result
   (ok (value i32))
   (err (code i32) (msg i32)))
 ```
 
-- Variant field types can be omitted when inferable: `(defunion result (ok (value)) (err (code) (msg)))`.
+- Variant field types can be omitted when inferable: `(defenum result (ok (value)) (err (code) (msg)))`.
 
 ### Functions
 
@@ -157,10 +157,16 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 
 - Prefix form: `(+ a b)`, `(total o)`.
 
-### Match
+### Literals
+
+- `true` / `false` are boolean literals.
+- `nil` lowers to unit `()`.
+- Keywords like `:status` lower to strings (e.g. `":status"`).
+
+### Match / Case
 
 ```
-(match x
+(case x
   (ok (value v) v)
   (err (code c) c)
   (_ 0))
@@ -186,6 +192,7 @@ This document describes the current Lisp-like DSL that compiles to Rust. It will
 
 - Hash map literal:
   - `(core.hashmap/new ("a" 1) ("b" 2))`
+  - `{ "a" 1 "b" 2 }`
 - B-tree map literal:
   - `(core.btreemap/new ("a" 1) ("b" 2))`
 - Empty map requires annotation:

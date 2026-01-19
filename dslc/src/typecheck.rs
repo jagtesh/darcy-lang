@@ -956,6 +956,9 @@ fn expand_inline_calls(
         Expr::Int(..)
         | Expr::Float(..)
         | Expr::Str(..)
+        | Expr::Bool(..)
+        | Expr::Unit(..)
+        | Expr::Keyword(..)
         | Expr::Var(..)
         | Expr::Continue { .. } => Ok(expr.clone()),
     }
@@ -964,7 +967,13 @@ fn expand_inline_calls(
 fn inline_subst_local(expr: &Expr, map: &BTreeMap<String, Expr>) -> Expr {
     match expr {
         Expr::Var(name, _) => map.get(name).cloned().unwrap_or_else(|| expr.clone()),
-        Expr::Int(..) | Expr::Float(..) | Expr::Str(..) | Expr::Continue { .. } => expr.clone(),
+        Expr::Int(..)
+        | Expr::Float(..)
+        | Expr::Str(..)
+        | Expr::Bool(..)
+        | Expr::Unit(..)
+        | Expr::Keyword(..)
+        | Expr::Continue { .. } => expr.clone(),
         Expr::Pair { key, val, span } => Expr::Pair {
             key: Box::new(inline_subst_local(key, map)),
             val: Box::new(inline_subst_local(val, map)),
@@ -1545,6 +1554,39 @@ fn infer_expr_type_internal(
             })
         }
         Expr::Str(_, sp) => {
+            let ty = InferTy::Named("string".to_string());
+            let mut types = BTreeMap::new();
+            types.insert(SpanKey::new(sp), ty.clone());
+            Ok(InferExpr {
+                expr: e.clone(),
+                ty,
+                casts: vec![],
+                types,
+            })
+        }
+        Expr::Bool(_, sp) => {
+            let ty = InferTy::Named("bool".to_string());
+            let mut types = BTreeMap::new();
+            types.insert(SpanKey::new(sp), ty.clone());
+            Ok(InferExpr {
+                expr: e.clone(),
+                ty,
+                casts: vec![],
+                types,
+            })
+        }
+        Expr::Unit(sp) => {
+            let ty = InferTy::Named("()".to_string());
+            let mut types = BTreeMap::new();
+            types.insert(SpanKey::new(sp), ty.clone());
+            Ok(InferExpr {
+                expr: e.clone(),
+                ty,
+                casts: vec![],
+                types,
+            })
+        }
+        Expr::Keyword(_, sp) => {
             let ty = InferTy::Named("string".to_string());
             let mut types = BTreeMap::new();
             types.insert(SpanKey::new(sp), ty.clone());

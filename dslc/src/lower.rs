@@ -213,6 +213,12 @@ fn lower_expr(
             let lit = format!("{:?}", s);
             format!("String::from({})", lit)
         }
+        Expr::Bool(v, _) => v.to_string(),
+        Expr::Unit(_) => "()".to_string(),
+        Expr::Keyword(s, _) => {
+            let lit = format!("{:?}", s);
+            format!("String::from({})", lit)
+        }
         Expr::Pair { .. } => "/* invalid pair */".to_string(),
         Expr::Var(v, _) => {
             if let Some(def) = def_names.get(v) {
