@@ -1,0 +1,11 @@
+[package]
+name = "darcy-stdlib"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+darcy-compiled = []
+default = ["darcy-compiled"]
+
+[build-dependencies]
+darcy-build = { path = "../darcy-build" }

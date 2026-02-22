@@ -3,17 +3,19 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use dslc::{compile_with_modules, render_diag};
+use dslc::{compile_with_modules_opts, render_diag, render_diag_with_level, CompileOptions};
 
 fn main() {
     let args = env::args().skip(1).collect::<Vec<_>>();
     if args.is_empty() || args[0] == "-h" || args[0] == "--help" {
         eprintln!(
-            "dslc (MVP)\n\nUsage:\n  dslc [--lib <dir>] <input.dsl>\n  dslc [--lib <dir>] run <input.dsl>\n\nOptions:\n  --lib, -L <dir>   Add a module search path (repeatable)\n\nOutputs Rust to stdout, or compiles and runs with 'run'.\n"
+            "dslc (MVP)\n\nUsage:\n  dslc [--lib <dir>] [--feedback] <input.dsl>\n  dslc [--lib <dir>] [--feedback] run <input.dsl> [--runtime]\n\nOptions:\n  --lib, -L <dir>   Add a module search path (repeatable)\n  --runtime         Use Cargo + darcy-runtime for interop (auto-detected)\n  --feedback        Run rustc feedback pass and re-emit Rust\n\nOutputs Rust to stdout, or compiles and runs with 'run'.\n"
         );
         std::process::exit(2);
     }
     let mut run_mode = false;
+    let mut runtime_mode = false;
+    let mut feedback_mode = false;
     let mut lib_paths: Vec<PathBuf> = Vec::new();
     let mut files: Vec<String> = Vec::new();
     let mut i = 0usize;
@@ -30,6 +32,14 @@ fn main() {
                 }
                 lib_paths.push(PathBuf::from(&args[i + 1]));
                 i += 2;
+            }
+            "--runtime" => {
+                runtime_mode = true;
+                i += 1;
+            }
+            "--feedback" => {
+                feedback_mode = true;
+                i += 1;
             }
             _ => {
                 files.push(args[i].clone());
@@ -51,7 +61,9 @@ fn main() {
     };
 
     let input_path = PathBuf::from(&file);
-    let input_dir = input_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let input_dir = input_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
     let mut search_paths = lib_paths;
     if !search_paths.contains(&input_dir.to_path_buf()) {
         search_paths.push(input_dir.to_path_buf());
@@ -62,15 +74,22 @@ fn main() {
         }
     }
 
-    match compile_with_modules(&input_path, &src, &search_paths) {
-        Ok(rust) => {
+    let opts = CompileOptions {
+        feedback: feedback_mode,
+    };
+    match compile_with_modules_opts(&input_path, &src, &search_paths, opts) {
+        Ok(output) => {
+            for w in &output.warnings {
+                eprintln!("{}", render_diag_with_level(&file, &src, w, "warning"));
+            }
             if run_mode {
-                if let Err(e) = run_rust(&file, &rust) {
+                let use_runtime = runtime_mode || output.rust.contains("darcy_runtime::");
+                if let Err(e) = run_rust(&file, &output.rust, use_runtime) {
                     eprintln!("error: {}", e);
                     std::process::exit(1);
                 }
             } else {
-                print!("{}", rust);
+                print!("{}", output.rust);
             }
         }
         Err(d) => {
@@ -80,7 +99,10 @@ fn main() {
     }
 }
 
-fn run_rust(input: &str, rust_src: &str) -> Result<(), String> {
+fn run_rust(input: &str, rust_src: &str, use_runtime: bool) -> Result<(), String> {
+    if use_runtime {
+        return run_rust_with_cargo(input, rust_src);
+    }
     let mut dir = env::temp_dir();
     dir.push("dslc_run");
     fs::create_dir_all(&dir).map_err(|e| format!("cannot create temp dir: {}", e))?;
@@ -108,4 +130,44 @@ fn run_rust(input: &str, rust_src: &str) -> Result<(), String> {
         return Err("program exited with non-zero status".to_string());
     }
     Ok(())
+}
+
+fn run_rust_with_cargo(_input: &str, rust_src: &str) -> Result<(), String> {
+    let cwd = env::current_dir().map_err(|e| format!("cannot get cwd: {}", e))?;
+    let runtime = runtime_path()?;
+    let mut dir = env::temp_dir();
+    dir.push(format!("dslc_run_{}", std::process::id()));
+    fs::create_dir_all(&dir).map_err(|e| format!("cannot create temp dir: {}", e))?;
+    let src_dir = dir.join("src");
+    fs::create_dir_all(&src_dir).map_err(|e| format!("cannot create src dir: {}", e))?;
+    let main_path = src_dir.join("main.rs");
+    let cargo_toml = dir.join("Cargo.toml");
+
+    fs::write(&main_path, rust_src).map_err(|e| format!("cannot write main.rs: {}", e))?;
+    let cargo_contents = format!(
+        "[package]\nname = \"dslc_run\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\ndarcy-runtime = {{ path = \"{}\" }}\n",
+        runtime.display()
+    );
+    fs::write(&cargo_toml, cargo_contents)
+        .map_err(|e| format!("cannot write Cargo.toml: {}", e))?;
+
+    let status = Command::new("cargo")
+        .arg("run")
+        .env("DARCY_ROOT", &cwd)
+        .current_dir(&dir)
+        .status()
+        .map_err(|e| format!("failed to invoke cargo: {}", e))?;
+    if !status.success() {
+        return Err("cargo run failed".to_string());
+    }
+    Ok(())
+}
+
+fn runtime_path() -> Result<PathBuf, String> {
+    let cwd = env::current_dir().map_err(|e| format!("cannot get cwd: {}", e))?;
+    let candidate = cwd.join("crates/darcy-runtime");
+    if candidate.exists() {
+        return Ok(candidate);
+    }
+    Err("darcy-runtime not found; run from workspace root".to_string())
 }

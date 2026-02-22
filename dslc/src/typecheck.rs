@@ -130,16 +130,9 @@ impl InferFnEnv {
     }
 }
 
-fn freshen_infer_ty(
-    ctx: &mut InferCtx,
-    ty: &InferTy,
-    map: &mut BTreeMap<u32, InferTy>,
-) -> InferTy {
+fn freshen_infer_ty(ctx: &mut InferCtx, ty: &InferTy, map: &mut BTreeMap<u32, InferTy>) -> InferTy {
     match ctx.resolve(ty) {
-        InferTy::Var(id) => map
-            .entry(id)
-            .or_insert_with(|| ctx.fresh_var())
-            .clone(),
+        InferTy::Var(id) => map.entry(id).or_insert_with(|| ctx.fresh_var()).clone(),
         InferTy::Vec(inner) => InferTy::Vec(Box::new(freshen_infer_ty(ctx, &inner, map))),
         InferTy::Set(inner) => InferTy::Set(Box::new(freshen_infer_ty(ctx, &inner, map))),
         InferTy::Option(inner) => InferTy::Option(Box::new(freshen_infer_ty(ctx, &inner, map))),
@@ -1037,7 +1030,7 @@ fn rewrite_calls_for_specialization(
             let spec_name = spec_name_by_key.entry(entry_key).or_insert_with(|| {
                 let base = template.def.rust_name.clone();
                 let hash = fnv1a_64(&key_str);
-                format!("{}__spec_{:x}", base, hash)
+                format!("{}_spec_{:x}", base, hash)
             });
 
             to_remove.insert(template.def.name.clone());
@@ -1223,7 +1216,9 @@ fn rewrite_calls_for_specialization(
                 to_remove,
             );
         }
-        Expr::Match { scrutinee, arms, .. } => {
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
             rewrite_calls_for_specialization(
                 scrutinee,
                 types,
@@ -1367,9 +1362,10 @@ fn substitute_ty(ty: &Ty, subst: &BTreeMap<u32, Ty>) -> Ty {
         Ty::Vec(inner) => Ty::Vec(Box::new(substitute_ty(inner, subst))),
         Ty::Set(inner) => Ty::Set(Box::new(substitute_ty(inner, subst))),
         Ty::Option(inner) => Ty::Option(Box::new(substitute_ty(inner, subst))),
-        Ty::Result(ok, err) => {
-            Ty::Result(Box::new(substitute_ty(ok, subst)), Box::new(substitute_ty(err, subst)))
-        }
+        Ty::Result(ok, err) => Ty::Result(
+            Box::new(substitute_ty(ok, subst)),
+            Box::new(substitute_ty(err, subst)),
+        ),
         Ty::Map(k, kt, vt) => Ty::Map(
             k.clone(),
             Box::new(substitute_ty(kt, subst)),
@@ -1390,9 +1386,9 @@ fn match_ty_pattern(pat: &Ty, actual: &Ty, subst: &mut BTreeMap<u32, Ty>) -> boo
             }
         },
         (Ty::Named(a), Ty::Named(b)) => a == b,
-        (Ty::Vec(a), Ty::Vec(b))
-        | (Ty::Set(a), Ty::Set(b))
-        | (Ty::Option(a), Ty::Option(b)) => match_ty_pattern(a, b, subst),
+        (Ty::Vec(a), Ty::Vec(b)) | (Ty::Set(a), Ty::Set(b)) | (Ty::Option(a), Ty::Option(b)) => {
+            match_ty_pattern(a, b, subst)
+        }
         (Ty::Result(a1, a2), Ty::Result(b1, b2)) => {
             match_ty_pattern(a1, b1, subst) && match_ty_pattern(a2, b2, subst)
         }
@@ -1453,12 +1449,8 @@ fn infer_param_modes(program: &TypecheckedProgram) -> FnEnv {
             if f.def.extern_ || f.def.params.is_empty() {
                 continue;
             }
-            let consumed = param_consumption_in_expr(
-                &f.body.expr,
-                &f.param_tys,
-                &builtin_modes,
-                &fn_modes,
-            );
+            let consumed =
+                param_consumption_in_expr(&f.body.expr, &f.param_tys, &builtin_modes, &fn_modes);
             let mut next_modes = Vec::new();
             for p in &f.def.params {
                 let ty = f
@@ -1589,14 +1581,20 @@ fn analyze_moves_expr(
             consume_var(name, sp, types, locals, moved, plan, use_counts, in_loop);
         }
         Expr::Ascribe { expr, .. } => {
-            analyze_moves_expr(expr, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+            analyze_moves_expr(
+                expr, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+            );
         }
         Expr::Cast { expr, .. } => {
-            analyze_moves_expr(expr, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+            analyze_moves_expr(
+                expr, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+            );
         }
         Expr::Let { bindings, body, .. } => {
             for b in bindings {
-                analyze_moves_expr(&b.expr, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+                analyze_moves_expr(
+                    &b.expr, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+                );
                 let ty = types_map
                     .get(&SpanKey::new(&b.expr.span()))
                     .cloned()
@@ -1604,7 +1602,9 @@ fn analyze_moves_expr(
                 types.insert(b.rust_name.clone(), ty);
                 locals.insert(b.rust_name.clone());
             }
-            analyze_moves_expr(body, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+            analyze_moves_expr(
+                body, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+            );
         }
         Expr::Lambda { params, body, .. } => {
             let mut nested_locals = locals.clone();
@@ -1635,29 +1635,43 @@ fn analyze_moves_expr(
                     .copied()
                     .unwrap_or(ParamMode::ByVal);
                 if matches!(mode, ParamMode::ByRef | ParamMode::ByRefNoAmp) {
-                    analyze_moves_borrow(arg, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+                    analyze_moves_borrow(
+                        arg, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+                    );
                 } else {
-                    analyze_moves_expr(arg, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+                    analyze_moves_expr(
+                        arg, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+                    );
                 }
             }
         }
         Expr::CallDyn { args, .. } => {
             for arg in args {
-                analyze_moves_expr(arg, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+                analyze_moves_expr(
+                    arg, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+                );
             }
         }
         Expr::MethodCall { base, args, .. } => {
-            analyze_moves_expr(base, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+            analyze_moves_expr(
+                base, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+            );
             for arg in args {
-                analyze_moves_expr(arg, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+                analyze_moves_expr(
+                    arg, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+                );
             }
         }
         Expr::Field { base, .. } => {
-            analyze_moves_borrow(base, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+            analyze_moves_borrow(
+                base, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+            );
         }
         Expr::Do { exprs, .. } => {
             for e in exprs {
-                analyze_moves_expr(e, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+                analyze_moves_expr(
+                    e, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+                );
             }
         }
         Expr::If {
@@ -1666,7 +1680,9 @@ fn analyze_moves_expr(
             else_br,
             ..
         } => {
-            analyze_moves_expr(cond, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+            analyze_moves_expr(
+                cond, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+            );
             let mut moved_then = moved.clone();
             analyze_moves_expr(
                 then_br,
@@ -1699,38 +1715,62 @@ fn analyze_moves_expr(
             }
         }
         Expr::Loop { body, .. } | Expr::While { body, .. } => {
-            analyze_moves_expr(body, types_map, fn_env, types, locals, moved, plan, use_counts, true);
+            analyze_moves_expr(
+                body, types_map, fn_env, types, locals, moved, plan, use_counts, true,
+            );
         }
         Expr::For { body, .. } => {
-            analyze_moves_expr(body, types_map, fn_env, types, locals, moved, plan, use_counts, true);
+            analyze_moves_expr(
+                body, types_map, fn_env, types, locals, moved, plan, use_counts, true,
+            );
         }
         Expr::Set { expr, .. } => {
-            analyze_moves_expr(expr, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+            analyze_moves_expr(
+                expr, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+            );
         }
-        Expr::Match { scrutinee, arms, .. } => {
-            analyze_moves_expr(scrutinee, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            analyze_moves_expr(
+                scrutinee, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+            );
             for arm in arms {
-                analyze_moves_expr(&arm.body, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+                analyze_moves_expr(
+                    &arm.body, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+                );
             }
         }
         Expr::VecLit { elems, .. } | Expr::SetLit { elems, .. } => {
             for e in elems {
-                analyze_moves_expr(e, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+                analyze_moves_expr(
+                    e, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+                );
             }
         }
         Expr::MapLit { entries, .. } => {
             for (k, v) in entries {
-                analyze_moves_expr(k, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
-                analyze_moves_expr(v, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+                analyze_moves_expr(
+                    k, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+                );
+                analyze_moves_expr(
+                    v, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+                );
             }
         }
         Expr::Pair { key, val, .. } => {
-            analyze_moves_expr(key, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
-            analyze_moves_expr(val, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+            analyze_moves_expr(
+                key, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+            );
+            analyze_moves_expr(
+                val, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+            );
         }
         Expr::Break { value, .. } => {
             if let Some(v) = value {
-                analyze_moves_expr(v, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop);
+                analyze_moves_expr(
+                    v, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+                );
             }
         }
         Expr::Int(..)
@@ -1758,10 +1798,20 @@ fn analyze_moves_borrow(
         Expr::Var(name, sp) => {
             if should_consume_var(name, types, moved) {
                 let key = SpanKey::new(sp);
-                plan.auto_clones.insert(key);
+                if plan.auto_clones.insert(key) {
+                    plan.warnings.push(
+                        Diag::new(format!(
+                            "auto-cloned '{}' to avoid move; consider darcy.core/clone",
+                            name
+                        ))
+                        .with_span(sp.clone()),
+                    );
+                }
             }
         }
-        _ => analyze_moves_expr(expr, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop),
+        _ => analyze_moves_expr(
+            expr, types_map, fn_env, types, locals, moved, plan, use_counts, in_loop,
+        ),
     }
 }
 
@@ -1801,11 +1851,7 @@ fn consume_var(
     dec_use_count(use_counts, name);
 }
 
-fn should_consume_var(
-    name: &str,
-    types: &BTreeMap<String, Ty>,
-    moved: &BTreeSet<String>,
-) -> bool {
+fn should_consume_var(name: &str, types: &BTreeMap<String, Ty>, moved: &BTreeSet<String>) -> bool {
     if let Some(ty) = types.get(name) {
         if is_copy_type(ty) {
             return false;
@@ -1861,7 +1907,14 @@ fn count_consumed_uses(
                 nested_locals.insert(p.rust_name.clone());
                 nested_types.insert(p.rust_name.clone(), Ty::Unknown);
             }
-            count_consumed_uses(body, types_map, fn_env, &mut nested_types, &mut nested_locals, counts);
+            count_consumed_uses(
+                body,
+                types_map,
+                fn_env,
+                &mut nested_types,
+                &mut nested_locals,
+                counts,
+            );
         }
         Expr::Call { op, args, .. } => {
             let modes = fn_env.get(op).map(|s| s.param_modes.clone());
@@ -1915,7 +1968,9 @@ fn count_consumed_uses(
         Expr::Set { expr, .. } => {
             count_consumed_uses(expr, types_map, fn_env, types, locals, counts);
         }
-        Expr::Match { scrutinee, arms, .. } => {
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
             count_consumed_uses(scrutinee, types_map, fn_env, types, locals, counts);
             for arm in arms {
                 count_consumed_uses(&arm.body, types_map, fn_env, types, locals, counts);
@@ -1997,14 +2052,7 @@ fn param_consumption_visit(
         }
         Expr::Let { bindings, body, .. } => {
             for b in bindings {
-                param_consumption_visit(
-                    &b.expr,
-                    param_tys,
-                    builtin_modes,
-                    fn_modes,
-                    locals,
-                    out,
-                );
+                param_consumption_visit(&b.expr, param_tys, builtin_modes, fn_modes, locals, out);
                 locals.insert(b.rust_name.clone());
             }
             param_consumption_visit(body, param_tys, builtin_modes, fn_modes, locals, out);
@@ -2017,10 +2065,7 @@ fn param_consumption_visit(
             param_consumption_visit(body, param_tys, builtin_modes, fn_modes, &mut nested, out);
         }
         Expr::Call { op, args, .. } => {
-            let modes = fn_modes
-                .get(op)
-                .or_else(|| builtin_modes.get(op))
-                .cloned();
+            let modes = fn_modes.get(op).or_else(|| builtin_modes.get(op)).cloned();
             for (idx, arg) in args.iter().enumerate() {
                 let mode = modes
                     .as_ref()
@@ -2028,9 +2073,7 @@ fn param_consumption_visit(
                     .copied()
                     .unwrap_or(ParamMode::ByVal);
                 if matches!(mode, ParamMode::ByRef | ParamMode::ByRefNoAmp) {
-                    param_consumption_borrow(
-                        arg, param_tys, builtin_modes, fn_modes, locals, out,
-                    );
+                    param_consumption_borrow(arg, param_tys, builtin_modes, fn_modes, locals, out);
                 } else {
                     param_consumption_visit(arg, param_tys, builtin_modes, fn_modes, locals, out);
                 }
@@ -2073,7 +2116,9 @@ fn param_consumption_visit(
         Expr::For { body, .. } => {
             param_consumption_visit(body, param_tys, builtin_modes, fn_modes, locals, out);
         }
-        Expr::Match { scrutinee, arms, .. } => {
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
             param_consumption_visit(scrutinee, param_tys, builtin_modes, fn_modes, locals, out);
             for arm in arms {
                 param_consumption_visit(&arm.body, param_tys, builtin_modes, fn_modes, locals, out);
@@ -2128,10 +2173,25 @@ fn param_consumption_borrow(
 
 fn builtin_param_modes() -> BTreeMap<String, Vec<ParamMode>> {
     let mut out = BTreeMap::new();
+    out.insert("darcy.vec/len".to_string(), vec![ParamMode::ByRef]);
+    out.insert("darcy.vec/is-empty".to_string(), vec![ParamMode::ByRef]);
+    out.insert("darcy.vec/range".to_string(), vec![ParamMode::ByVal]);
     out.insert(
-        "darcy.hash-map/len".to_string(),
-        vec![ParamMode::ByRef],
+        "darcy.vec/get".to_string(),
+        vec![ParamMode::ByRef, ParamMode::ByVal],
     );
+    out.insert("darcy.string/len".to_string(), vec![ParamMode::ByRef]);
+    out.insert("darcy.string/is-empty".to_string(), vec![ParamMode::ByRef]);
+    out.insert("darcy.string/trim".to_string(), vec![ParamMode::ByRef]);
+    out.insert(
+        "darcy.string/split".to_string(),
+        vec![ParamMode::ByRef, ParamMode::ByRef],
+    );
+    out.insert(
+        "darcy.string/join".to_string(),
+        vec![ParamMode::ByRef, ParamMode::ByRef],
+    );
+    out.insert("darcy.hash-map/len".to_string(), vec![ParamMode::ByRef]);
     out.insert(
         "darcy.hash-map/is-empty".to_string(),
         vec![ParamMode::ByRef],
@@ -2144,10 +2204,7 @@ fn builtin_param_modes() -> BTreeMap<String, Vec<ParamMode>> {
         "darcy.hash-map/contains".to_string(),
         vec![ParamMode::ByRef, ParamMode::ByVal],
     );
-    out.insert(
-        "darcy.btree-map/len".to_string(),
-        vec![ParamMode::ByRef],
-    );
+    out.insert("darcy.btree-map/len".to_string(), vec![ParamMode::ByRef]);
     out.insert(
         "darcy.btree-map/is-empty".to_string(),
         vec![ParamMode::ByRef],
@@ -2160,28 +2217,23 @@ fn builtin_param_modes() -> BTreeMap<String, Vec<ParamMode>> {
         "darcy.btree-map/contains".to_string(),
         vec![ParamMode::ByRef, ParamMode::ByVal],
     );
-    out.insert(
-        "darcy.core/clone".to_string(),
-        vec![ParamMode::ByRef],
-    );
+    out.insert("darcy.core/clone".to_string(), vec![ParamMode::ByRef]);
     out.insert("darcy.vec/len".to_string(), vec![ParamMode::ByRef]);
     out.insert("darcy.vec/is-empty".to_string(), vec![ParamMode::ByRef]);
-    out.insert(
-        "darcy.vec/get".to_string(),
-        vec![ParamMode::ByRef, ParamMode::ByVal],
-    );
+    out.insert("darcy.core/clone".to_string(), vec![ParamMode::ByRefNoAmp]);
+    out.insert("darcy.io/dbg".to_string(), vec![ParamMode::ByRefNoAmp]);
     out.insert("darcy.string/len".to_string(), vec![ParamMode::ByRef]);
     out.insert("darcy.string/is-empty".to_string(), vec![ParamMode::ByRef]);
     out.insert("darcy.string/trim".to_string(), vec![ParamMode::ByRef]);
-    out.insert("darcy.string/split".to_string(), vec![ParamMode::ByRef, ParamMode::ByRef]);
+    out.insert(
+        "darcy.string/split".to_string(),
+        vec![ParamMode::ByRef, ParamMode::ByRef],
+    );
     out.insert(
         "darcy.string/join".to_string(),
         vec![ParamMode::ByVal, ParamMode::ByRef],
     );
-    out.insert(
-        "darcy.io/dbg".to_string(),
-        vec![ParamMode::ByRefNoAmp],
-    );
+    out.insert("darcy.fmt/pretty".to_string(), vec![ParamMode::ByRefNoAmp]);
     out
 }
 
@@ -2189,8 +2241,7 @@ fn is_copy_type(ty: &Ty) -> bool {
     match ty {
         Ty::Named(n) => matches!(
             n.as_str(),
-            "i8"
-                | "i16"
+            "i8" | "i16"
                 | "i32"
                 | "i64"
                 | "i128"
@@ -2640,11 +2691,6 @@ fn inline_subst_local(expr: &Expr, map: &BTreeMap<String, Expr>) -> Expr {
             span: span.clone(),
             ann: ann.clone(),
         },
-        Expr::SetLit { elems, span, ann } => Expr::SetLit {
-            elems: elems.iter().map(|e| inline_subst_local(e, map)).collect(),
-            span: span.clone(),
-            ann: ann.clone(),
-        },
         Expr::MapLit {
             kind,
             entries,
@@ -2662,6 +2708,11 @@ fn inline_subst_local(expr: &Expr, map: &BTreeMap<String, Expr>) -> Expr {
                 ann: ann.clone(),
             }
         }
+        Expr::SetLit { elems, span, ann } => Expr::SetLit {
+            elems: elems.iter().map(|e| inline_subst_local(e, map)).collect(),
+            span: span.clone(),
+            ann: ann.clone(),
+        },
     }
 }
 
@@ -2714,9 +2765,7 @@ fn add_bound(bounds: &mut BTreeMap<u32, Vec<GenericBound>>, id: u32, bound: Gene
 fn collect_generic_ids(ty: &Ty, out: &mut Vec<u32>) {
     match ty {
         Ty::Generic(id) => out.push(*id),
-        Ty::Vec(inner)
-        | Ty::Set(inner)
-        | Ty::Option(inner) => collect_generic_ids(inner, out),
+        Ty::Vec(inner) | Ty::Set(inner) | Ty::Option(inner) => collect_generic_ids(inner, out),
         Ty::Result(ok, err) => {
             collect_generic_ids(ok, out);
             collect_generic_ids(err, out);
@@ -2739,9 +2788,9 @@ fn collect_infer_var_ids(ty: &InferTy, out: &mut BTreeSet<u32>) {
         InferTy::Var(id) => {
             out.insert(*id);
         }
-        InferTy::Vec(inner)
-        | InferTy::Set(inner)
-        | InferTy::Option(inner) => collect_infer_var_ids(inner, out),
+        InferTy::Vec(inner) | InferTy::Set(inner) | InferTy::Option(inner) => {
+            collect_infer_var_ids(inner, out)
+        }
         InferTy::Result(ok, err) => {
             collect_infer_var_ids(ok, out);
             collect_infer_var_ids(err, out);
@@ -2760,11 +2809,7 @@ fn collect_infer_var_ids(ty: &InferTy, out: &mut BTreeSet<u32>) {
     }
 }
 
-fn add_bounds_for_ty(
-    ty: &Ty,
-    bounds: &mut BTreeMap<u32, Vec<GenericBound>>,
-    bound: GenericBound,
-) {
+fn add_bounds_for_ty(ty: &Ty, bounds: &mut BTreeMap<u32, Vec<GenericBound>>, bound: GenericBound) {
     let mut ids = Vec::new();
     collect_generic_ids(ty, &mut ids);
     for id in ids {
@@ -2867,7 +2912,9 @@ fn collect_bounds_expr(
                 collect_bounds_expr(arg, types, auto_clones, bounds);
             }
         }
-        Expr::MethodCall { base, method, args, .. } => {
+        Expr::MethodCall {
+            base, method, args, ..
+        } => {
             if let Some(base_ty) = expr_ty(types, base) {
                 match (base_ty, method.as_str()) {
                     (Ty::Generic(id), "len") => add_bound(bounds, *id, GenericBound::Len),
@@ -2928,7 +2975,9 @@ fn collect_bounds_expr(
             }
             collect_bounds_expr(body, types, auto_clones, bounds);
         }
-        Expr::Match { scrutinee, arms, .. } => {
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
             collect_bounds_expr(scrutinee, types, auto_clones, bounds);
             for arm in arms {
                 collect_bounds_expr(&arm.body, types, auto_clones, bounds);
@@ -3030,7 +3079,9 @@ fn collect_mutated_vars(expr: &Expr, out: &mut BTreeSet<String>) {
             }
             collect_mutated_vars(body, out);
         }
-        Expr::Match { scrutinee, arms, .. } => {
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
             collect_mutated_vars(scrutinee, out);
             for arm in arms {
                 collect_mutated_vars(&arm.body, out);
@@ -3174,6 +3225,13 @@ pub fn typecheck_fn(
     }
     check_numeric_constraints(&mut ctx, &keep_vars)?;
     check_int_constraints(&mut ctx, &keep_vars)?;
+    let mut keep_vars = BTreeSet::new();
+    for ty in param_tys.values() {
+        let resolved = ctx.resolve(ty);
+        collect_infer_var_ids(&resolved, &mut keep_vars);
+    }
+    check_numeric_constraints(&mut ctx, &keep_vars)?;
+    check_int_constraints(&mut ctx, &keep_vars)?;
     let mut final_param_tys = BTreeMap::new();
     for (name, ty) in &param_tys {
         let resolved = infer_to_ty_allow_generic(&ctx, ty);
@@ -3189,6 +3247,8 @@ pub fn typecheck_fn(
 
     let mut bounds = BTreeMap::new();
     collect_bounds_expr(&body.expr, &body.types, &BTreeSet::new(), &mut bounds);
+    let mut mutated = BTreeSet::new();
+    collect_mutated_vars(&body.expr, &mut mutated);
     let mut mutated = BTreeSet::new();
     collect_mutated_vars(&body.expr, &mut mutated);
     Ok(TypedFn {
@@ -3651,16 +3711,18 @@ fn infer_expr_type_internal(
             match &resolved {
                 InferTy::Named(name) => {
                     if !is_cast_source_name(name) {
-                        return Err(
-                            Diag::new("cast source must be numeric or bool").with_span(span.clone())
-                        );
+                        return Err(Diag::new("cast source must be numeric or bool")
+                            .with_span(span.clone()));
                     }
                 }
                 InferTy::Var(_) => {
-                    ctx.numeric_constraints.push((resolved.clone(), span.clone()));
+                    ctx.numeric_constraints
+                        .push((resolved.clone(), span.clone()));
                 }
                 _ => {
-                    return Err(Diag::new("cast source must be numeric or bool").with_span(span.clone()));
+                    return Err(
+                        Diag::new("cast source must be numeric or bool").with_span(span.clone())
+                    );
                 }
             }
             types.insert(SpanKey::new(span), target_ty.clone());
@@ -3790,6 +3852,7 @@ fn infer_expr_type_internal(
                 types,
             })
         }
+
         Expr::Let {
             bindings,
             body,
@@ -4010,9 +4073,7 @@ fn infer_expr_type_internal(
                 }
                 (InferTy::Vec(inner), "push") => {
                     if targs.len() != 1 {
-                        return Err(
-                            Diag::new("push expects 1 argument").with_span(span.clone())
-                        );
+                        return Err(Diag::new("push expects 1 argument").with_span(span.clone()));
                     }
                     ctx.unify(&targs[0].ty, &inner, &args[0].span())?;
                     ret = InferTy::Named("()".to_string());
@@ -4055,6 +4116,7 @@ fn infer_expr_type_internal(
                 types,
             })
         }
+
         Expr::Do { exprs, span } => {
             let mut casts = Vec::new();
             let mut types = BTreeMap::new();
@@ -4308,10 +4370,11 @@ fn infer_expr_type_internal(
                                 .push((elem_resolved.clone(), range.span.clone()));
                         }
                         _ => {
-                            let elem_concrete = infer_to_ty(ctx, &elem_resolved).ok_or_else(|| {
-                                Diag::new("cannot infer range element type")
-                                    .with_span(range.span.clone())
-                            })?;
+                            let elem_concrete =
+                                infer_to_ty(ctx, &elem_resolved).ok_or_else(|| {
+                                    Diag::new("cannot infer range element type")
+                                        .with_span(range.span.clone())
+                                })?;
                             if !is_numeric(&elem_concrete) {
                                 return Err(Diag::new("range bounds must be numeric")
                                     .with_span(range.span.clone()));
@@ -4410,8 +4473,9 @@ fn infer_expr_type_internal(
             if let Some(existing) = vars.get(name) {
                 ctx.unify(existing, &texpr.ty, span)?;
             } else {
-                return Err(Diag::new(format!("unknown variable '{}'", name))
-                    .with_span(span.clone()));
+                return Err(
+                    Diag::new(format!("unknown variable '{}'", name)).with_span(span.clone())
+                );
             }
             let out_ty = InferTy::Named("()".to_string());
             types.insert(SpanKey::new(span), out_ty.clone());
@@ -4422,6 +4486,7 @@ fn infer_expr_type_internal(
                 types,
             })
         }
+
         Expr::Break { value, span } => {
             if loop_stack.is_empty() {
                 return Err(Diag::new("break is only allowed inside loops").with_span(span.clone()));
@@ -4569,41 +4634,48 @@ fn infer_expr_type_internal(
                 base,
             )?;
             let base_ty = ctx.resolve(&tb.ty);
-            let (struct_name, is_vec) =
-                match base_ty {
-                    InferTy::Named(n) => (n, false),
-                    InferTy::Vec(inner) => match ctx.resolve(&inner) {
-                        InferTy::Named(n) => (n, true),
-                        InferTy::Var(_) => {
-                            return Err(Diag::new("cannot access field on unknown vector type")
-                                .with_span(span.clone()))
-                        }
-                        InferTy::Vec(_) => {
-                            return Err(Diag::new("cannot access field on nested vector type")
-                                .with_span(span.clone()))
-                        }
-                        InferTy::Option(_)
-                        | InferTy::Result(_, _)
-                        | InferTy::Set(_)
-                        | InferTy::Map(_, _, _)
-                        | InferTy::Fn(_, _) => {
-                            return Err(Diag::new("cannot access field on non-struct vector type")
-                                .with_span(span.clone()))
-                        }
-                    },
+            let (struct_name, is_vec) = match base_ty {
+                InferTy::Named(n) => (n, false),
+                InferTy::Vec(inner) => match ctx.resolve(&inner) {
+                    InferTy::Named(n) => (n, true),
                     InferTy::Var(_) => {
-                        return Err(Diag::new("cannot access field on unknown type")
+                        return Err(Diag::new("cannot access field on unknown vector type")
+                            .with_span(span.clone()))
+                    }
+                    InferTy::Vec(_) => {
+                        return Err(Diag::new("cannot access field on nested vector type")
                             .with_span(span.clone()))
                     }
                     InferTy::Option(_)
                     | InferTy::Result(_, _)
-                    | InferTy::Set(_)
                     | InferTy::Map(_, _, _)
                     | InferTy::Fn(_, _) => {
-                        return Err(Diag::new("cannot access field on non-struct type")
+                        return Err(Diag::new("cannot access field on non-struct vector type")
                             .with_span(span.clone()))
                     }
-                };
+                    InferTy::Set(_) => {
+                        return Err(
+                            Diag::new("cannot access field on set type").with_span(span.clone())
+                        )
+                    }
+                },
+                InferTy::Var(_) => {
+                    return Err(
+                        Diag::new("cannot access field on unknown type").with_span(span.clone())
+                    )
+                }
+                InferTy::Option(_)
+                | InferTy::Result(_, _)
+                | InferTy::Map(_, _, _)
+                | InferTy::Fn(_, _) => {
+                    return Err(
+                        Diag::new("cannot access field on non-struct type").with_span(span.clone())
+                    )
+                }
+                InferTy::Set(_) => {
+                    return Err(Diag::new("cannot access field on set type").with_span(span.clone()))
+                }
+            };
             let sinfo = field_env.structs.get(&struct_name).ok_or_else(|| {
                 Diag::new(format!("unknown type '{}'", struct_name)).with_span(span.clone())
             })?;
@@ -4664,11 +4736,11 @@ fn infer_expr_type_internal(
                 }
                 InferTy::Option(_)
                 | InferTy::Result(_, _)
-                | InferTy::Set(_)
                 | InferTy::Map(_, _, _)
                 | InferTy::Fn(_, _) => {
                     return Err(Diag::new("cannot case on non-union type").with_span(span.clone()))
                 }
+                InferTy::Set(_) => todo!(),
             };
             if !env.unions.contains_key(&union_name) {
                 return Err(Diag::new(format!("type '{}' is not a union", union_name))
@@ -4747,15 +4819,22 @@ fn infer_expr_type_internal(
                 }
             }
 
-            if !has_wildcard {
-                let all = &env.unions.get(&union_name).unwrap().variants;
-                if seen.len() != all.len() {
-                    let mut missing = Vec::new();
-                    for v in all {
-                        if !seen.contains(&v.name) {
-                            missing.push(v.name.clone());
-                        }
-                    }
+            let mut missing = Vec::new();
+            let all_variants = &env.unions.get(&union_name).unwrap().variants;
+            for v in all_variants {
+                if !seen.contains(&v.name) {
+                    missing.push(v.name.clone());
+                }
+            }
+
+            let mut final_arms = arms.clone();
+            if missing.is_empty() {
+                if has_wildcard {
+                    eprintln!("warning: redundant wildcard arm; all variants are already covered");
+                    final_arms.retain(|arm| !matches!(arm.pat, MatchPat::Wildcard(_)));
+                }
+            } else {
+                if !has_wildcard {
                     return Err(Diag::new(format!(
                         "non-exhaustive case, missing: {}",
                         missing.join(", ")
@@ -4763,6 +4842,16 @@ fn infer_expr_type_internal(
                     .with_span(span.clone()));
                 }
             }
+
+            let e = if final_arms.len() != arms.len() {
+                Expr::Match {
+                    scrutinee: scrutinee.clone(),
+                    arms: final_arms,
+                    span: span.clone(),
+                }
+            } else {
+                e.clone()
+            };
 
             let out_ty = out_ty.unwrap_or_else(|| ctx.fresh_var());
             types.insert(SpanKey::new(span), out_ty.clone());
@@ -4890,9 +4979,7 @@ fn infer_expr_type_internal(
                 }
                 "darcy.fmt/print" | "darcy.fmt/println" => {
                     if targs.len() != 1 {
-                        return Err(
-                            Diag::new("'print' expects 1 argument").with_span(span.clone())
-                        );
+                        return Err(Diag::new("'print' expects 1 argument").with_span(span.clone()));
                     }
                     let out_ty = InferTy::Named("()".to_string());
                     types.insert(SpanKey::new(span), out_ty.clone());
@@ -4920,9 +5007,7 @@ fn infer_expr_type_internal(
                 }
                 "darcy.option/some" => {
                     if targs.len() != 1 {
-                        return Err(
-                            Diag::new("'some' expects 1 argument").with_span(span.clone())
-                        );
+                        return Err(Diag::new("'some' expects 1 argument").with_span(span.clone()));
                     }
                     let out_ty = InferTy::Option(Box::new(targs[0].ty.clone()));
                     types.insert(SpanKey::new(span), out_ty.clone());
@@ -4935,12 +5020,10 @@ fn infer_expr_type_internal(
                 }
                 "darcy.option/none" => {
                     if !targs.is_empty() {
-                        return Err(
-                            Diag::new("'none' expects 0 arguments").with_span(span.clone())
-                        );
+                        return Err(Diag::new("'none' expects 0 arguments").with_span(span.clone()));
                     }
-                    let out_ty =
-                        InferTy::Option(Box::new(InferTy::Named("()".to_string())));
+                    // Option<T> None creates an Option where T is unknown initially
+                    let out_ty = InferTy::Option(Box::new(ctx.fresh_var()));
                     types.insert(SpanKey::new(span), out_ty.clone());
                     Ok(InferExpr {
                         expr: e.clone(),
@@ -4969,10 +5052,9 @@ fn infer_expr_type_internal(
                     if targs.len() != 1 {
                         return Err(Diag::new("'ok' expects 1 argument").with_span(span.clone()));
                     }
-                    let out_ty = InferTy::Result(
-                        Box::new(targs[0].ty.clone()),
-                        Box::new(InferTy::Named("()".to_string())),
-                    );
+                    // For Ok(T), the Err type is unknown, so use a fresh variable
+                    let out_ty =
+                        InferTy::Result(Box::new(targs[0].ty.clone()), Box::new(ctx.fresh_var()));
                     types.insert(SpanKey::new(span), out_ty.clone());
                     Ok(InferExpr {
                         expr: e.clone(),
@@ -4985,10 +5067,9 @@ fn infer_expr_type_internal(
                     if targs.len() != 1 {
                         return Err(Diag::new("'err' expects 1 argument").with_span(span.clone()));
                     }
-                    let out_ty = InferTy::Result(
-                        Box::new(InferTy::Named("()".to_string())),
-                        Box::new(targs[0].ty.clone()),
-                    );
+                    // For Err(E), the Ok type is unknown, so use a fresh variable
+                    let out_ty =
+                        InferTy::Result(Box::new(ctx.fresh_var()), Box::new(targs[0].ty.clone()));
                     types.insert(SpanKey::new(span), out_ty.clone());
                     Ok(InferExpr {
                         expr: e.clone(),
@@ -4997,11 +5078,10 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
+
                 "darcy.result/is-ok" | "darcy.result/is-err" => {
                     if targs.len() != 1 {
-                        return Err(
-                            Diag::new("'is-ok' expects 1 argument").with_span(span.clone())
-                        );
+                        return Err(Diag::new("'is-ok' expects 1 argument").with_span(span.clone()));
                     }
                     let _ = ensure_result_arg(ctx, &targs[0].ty, &args[0].span())?;
                     let out_ty = InferTy::Named("bool".to_string());
@@ -5015,9 +5095,7 @@ fn infer_expr_type_internal(
                 }
                 "darcy.math/exp" => {
                     if targs.len() != 1 {
-                        return Err(
-                            Diag::new("'exp' expects 1 argument").with_span(span.clone())
-                        );
+                        return Err(Diag::new("'exp' expects 1 argument").with_span(span.clone()));
                     }
                     let target = InferTy::Named("f64".to_string());
                     ctx.unify(&targs[0].ty, &target, &args[0].span())?;
@@ -5025,6 +5103,22 @@ fn infer_expr_type_internal(
                     Ok(InferExpr {
                         expr: e.clone(),
                         ty: target,
+                        casts,
+                        types,
+                    })
+                }
+                "darcy.vec/is-empty" => {
+                    if targs.len() != 1 {
+                        return Err(
+                            Diag::new("'is-empty' expects 1 argument").with_span(span.clone())
+                        );
+                    }
+                    let _ = ensure_vec_arg(ctx, &targs[0].ty, &args[0].span())?;
+                    let out_ty = InferTy::Named("bool".to_string());
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
                         casts,
                         types,
                     })
@@ -5096,9 +5190,7 @@ fn infer_expr_type_internal(
                 }
                 "darcy.math/abs" => {
                     if targs.len() != 1 {
-                        return Err(
-                            Diag::new("'abs' expects 1 argument").with_span(span.clone())
-                        );
+                        return Err(Diag::new("'abs' expects 1 argument").with_span(span.clone()));
                     }
                     let arg_ty = targs[0].ty.clone();
                     let resolved = ctx.resolve(&arg_ty);
@@ -5126,7 +5218,8 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
-                "darcy.math/gt" | "darcy.math/lt" | "darcy.math/eq" | "=" | "<" | ">" | "<=" | ">=" => {
+                "darcy.math/gt" | "darcy.math/lt" | "darcy.math/eq" | "=" | "<" | ">" | "<="
+                | ">=" => {
                     if targs.len() != 2 {
                         return Err(Diag::new("'cmp' expects 2 arguments").with_span(span.clone()));
                     }
@@ -5140,9 +5233,12 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
+
                 "&" | "|" => {
                     if targs.len() != 2 {
-                        return Err(Diag::new("'bitwise' expects 2 arguments").with_span(span.clone()));
+                        return Err(
+                            Diag::new("'bitwise' expects 2 arguments").with_span(span.clone())
+                        );
                     }
                     let a = &targs[0];
                     let b = &targs[1];
@@ -5165,9 +5261,7 @@ fn infer_expr_type_internal(
                 }
                 "darcy.core/clone" => {
                     if targs.len() != 1 {
-                        return Err(
-                            Diag::new("'clone' expects 1 argument").with_span(span.clone())
-                        );
+                        return Err(Diag::new("'clone' expects 1 argument").with_span(span.clone()));
                     }
                     let out_ty = targs[0].ty.clone();
                     types.insert(SpanKey::new(span), out_ty.clone());
@@ -5302,12 +5396,10 @@ fn infer_expr_type_internal(
                 }
                 "darcy.vec/range" => {
                     if targs.len() != 1 {
-                        return Err(
-                            Diag::new("'range' expects 1 argument").with_span(span.clone())
-                        );
+                        return Err(Diag::new("'range' expects 1 argument").with_span(span.clone()));
                     }
                     let _ = ensure_int_arg(ctx, &targs[0].ty, &args[0].span())?;
-                    let out_ty = InferTy::Vec(Box::new(InferTy::Named("usize".to_string())));
+                    let out_ty = InferTy::Vec(Box::new(InferTy::Named("i64".to_string())));
                     types.insert(SpanKey::new(span), out_ty.clone());
                     Ok(InferExpr {
                         expr: e.clone(),
@@ -5316,14 +5408,67 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
-                "darcy.vec/is-empty" => {
-                    if targs.len() != 1 {
+                "darcy.vec/fold" => {
+                    if targs.len() != 3 {
+                        return Err(Diag::new("'fold' expects 3 arguments").with_span(span.clone()));
+                    }
+                    let elem = ensure_vec_arg(ctx, &targs[2].ty, &args[2].span())?;
+                    let acc = targs[1].ty.clone();
+                    let fn_ty = InferTy::Fn(vec![acc.clone(), elem], Box::new(acc.clone()));
+                    ctx.unify(&targs[0].ty, &fn_ty, &args[0].span())?;
+                    types.insert(SpanKey::new(span), acc.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: acc,
+                        casts,
+                        types,
+                    })
+                }
+                "darcy.vec/map2" => {
+                    if targs.len() != 3 {
+                        return Err(Diag::new("'map2' expects 3 arguments").with_span(span.clone()));
+                    }
+                    let left = ensure_vec_arg(ctx, &targs[1].ty, &args[1].span())?;
+                    let right = ensure_vec_arg(ctx, &targs[2].ty, &args[2].span())?;
+                    let out_elem = ctx.fresh_var();
+                    let fn_ty = InferTy::Fn(vec![left, right], Box::new(out_elem.clone()));
+                    ctx.unify(&targs[0].ty, &fn_ty, &args[0].span())?;
+                    let out_ty = InferTy::Vec(Box::new(out_elem));
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "darcy.string/split" => {
+                    if targs.len() != 2 {
                         return Err(
-                            Diag::new("'is-empty' expects 1 argument").with_span(span.clone())
+                            Diag::new("'split' expects 2 arguments").with_span(span.clone())
                         );
                     }
-                    let _ = ensure_vec_arg(ctx, &targs[0].ty, &args[0].span())?;
-                    let out_ty = InferTy::Named("bool".to_string());
+                    let str_ty = InferTy::Named("string".to_string());
+                    ctx.unify(&targs[0].ty, &str_ty, &args[0].span())?;
+                    ctx.unify(&targs[1].ty, &str_ty, &args[1].span())?;
+                    let out_ty = InferTy::Vec(Box::new(str_ty));
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "darcy.string/join" => {
+                    if targs.len() != 2 {
+                        return Err(Diag::new("'join' expects 2 arguments").with_span(span.clone()));
+                    }
+                    let elem = ensure_vec_arg(ctx, &targs[0].ty, &args[0].span())?;
+                    let str_ty = InferTy::Named("string".to_string());
+                    ctx.unify(&elem, &str_ty, &args[0].span())?;
+                    ctx.unify(&targs[1].ty, &str_ty, &args[1].span())?;
+                    let out_ty = InferTy::Named("string".to_string());
                     types.insert(SpanKey::new(span), out_ty.clone());
                     Ok(InferExpr {
                         expr: e.clone(),
@@ -5364,11 +5509,48 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
-                "darcy.string/trim" => {
+
+                "darcy.option/unwrap" => {
                     if targs.len() != 1 {
                         return Err(
-                            Diag::new("'trim' expects 1 argument").with_span(span.clone())
+                            Diag::new("'unwrap' expects 1 argument").with_span(span.clone())
                         );
+                    }
+                    // Option<T> unwrap returns T
+                    let out_ty = ctx.fresh_var();
+                    let target = InferTy::Option(Box::new(out_ty.clone()));
+                    ctx.unify(&targs[0].ty, &target, &args[0].span())?;
+
+                    types.insert(SpanKey::new(span), out_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: out_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "darcy.option/unwrap-or" => {
+                    if targs.len() != 2 {
+                        return Err(
+                            Diag::new("'unwrap-or' expects 2 arguments").with_span(span.clone())
+                        );
+                    }
+                    // Option<T> unwrap-or(fallback: T) returns T
+                    let fallback_ty = targs[1].ty.clone();
+                    let target = InferTy::Option(Box::new(fallback_ty.clone()));
+                    ctx.unify(&targs[0].ty, &target, &args[0].span())?;
+
+                    types.insert(SpanKey::new(span), fallback_ty.clone());
+                    Ok(InferExpr {
+                        expr: e.clone(),
+                        ty: fallback_ty,
+                        casts,
+                        types,
+                    })
+                }
+                "darcy.string/trim" => {
+                    if targs.len() != 1 {
+                        return Err(Diag::new("'trim' expects 1 argument").with_span(span.clone()));
                     }
                     let target = InferTy::Named("string".to_string());
                     ctx.unify(&targs[0].ty, &target, &args[0].span())?;
@@ -5381,16 +5563,19 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
-                "darcy.string/split" => {
-                    if targs.len() != 2 {
+
+                "darcy.result/unwrap" => {
+                    if targs.len() != 1 {
                         return Err(
-                            Diag::new("'split' expects 2 arguments").with_span(span.clone())
+                            Diag::new("'unwrap' expects 1 argument").with_span(span.clone())
                         );
                     }
-                    let target = InferTy::Named("string".to_string());
+                    // Result<T, E> unwrap returns T
+                    let out_ty = ctx.fresh_var();
+                    let err_ty = ctx.fresh_var();
+                    let target = InferTy::Result(Box::new(out_ty.clone()), Box::new(err_ty));
                     ctx.unify(&targs[0].ty, &target, &args[0].span())?;
-                    ctx.unify(&targs[1].ty, &target, &args[1].span())?;
-                    let out_ty = InferTy::Vec(Box::new(target));
+
                     types.insert(SpanKey::new(span), out_ty.clone());
                     Ok(InferExpr {
                         expr: e.clone(),
@@ -5399,55 +5584,22 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
-                "darcy.string/join" => {
+                "darcy.result/unwrap-or" => {
                     if targs.len() != 2 {
                         return Err(
-                            Diag::new("'join' expects 2 arguments").with_span(span.clone())
+                            Diag::new("'unwrap-or' expects 2 arguments").with_span(span.clone())
                         );
                     }
-                    let elem = ensure_vec_arg(ctx, &targs[0].ty, &args[0].span())?;
-                    let target = InferTy::Named("string".to_string());
-                    ctx.unify(&elem, &target, &args[0].span())?;
-                    ctx.unify(&targs[1].ty, &target, &args[1].span())?;
-                    let out_ty = InferTy::Named("string".to_string());
-                    types.insert(SpanKey::new(span), out_ty.clone());
+                    // Result<T, E> unwrap-or(fallback: T) returns T
+                    let fallback_ty = targs[1].ty.clone();
+                    let err_ty = ctx.fresh_var();
+                    let target = InferTy::Result(Box::new(fallback_ty.clone()), Box::new(err_ty));
+                    ctx.unify(&targs[0].ty, &target, &args[0].span())?;
+
+                    types.insert(SpanKey::new(span), fallback_ty.clone());
                     Ok(InferExpr {
                         expr: e.clone(),
-                        ty: out_ty,
-                        casts,
-                        types,
-                    })
-                }
-                "darcy.vec/map2" => {
-                    if targs.len() != 3 {
-                        return Err(Diag::new("'map2' expects 3 arguments").with_span(span.clone()));
-                    }
-                    let left = ensure_vec_arg(ctx, &targs[1].ty, &args[1].span())?;
-                    let right = ensure_vec_arg(ctx, &targs[2].ty, &args[2].span())?;
-                    let out_elem = ctx.fresh_var();
-                    let fn_ty = InferTy::Fn(vec![left, right], Box::new(out_elem.clone()));
-                    ctx.unify(&targs[0].ty, &fn_ty, &args[0].span())?;
-                    let out_ty = InferTy::Vec(Box::new(out_elem));
-                    types.insert(SpanKey::new(span), out_ty.clone());
-                    Ok(InferExpr {
-                        expr: e.clone(),
-                        ty: out_ty,
-                        casts,
-                        types,
-                    })
-                }
-                "darcy.vec/fold" => {
-                    if targs.len() != 3 {
-                        return Err(Diag::new("'fold' expects 3 arguments").with_span(span.clone()));
-                    }
-                    let elem = ensure_vec_arg(ctx, &targs[2].ty, &args[2].span())?;
-                    let acc = targs[1].ty.clone();
-                    let fn_ty = InferTy::Fn(vec![acc.clone(), elem], Box::new(acc.clone()));
-                    ctx.unify(&targs[0].ty, &fn_ty, &args[0].span())?;
-                    types.insert(SpanKey::new(span), acc.clone());
-                    Ok(InferExpr {
-                        expr: e.clone(),
-                        ty: acc,
+                        ty: fallback_ty,
                         casts,
                         types,
                     })
@@ -5753,14 +5905,7 @@ fn ensure_vec_arg(ctx: &mut InferCtx, ty: &InferTy, span: &Span) -> DslResult<In
             ctx.unify(&resolved, &vec_ty, span)?;
             Ok(elem)
         }
-        InferTy::Named(name) => {
-            Err(Diag::new(format!("expected vector type, got '{}'", name)).with_span(span.clone()))
-        }
-        InferTy::Option(_)
-        | InferTy::Result(_, _)
-        | InferTy::Set(_)
-        | InferTy::Map(_, _, _)
-        | InferTy::Fn(_, _) => Err(Diag::new("expected vector type").with_span(span.clone())),
+        _ => Err(Diag::new("expected vector type").with_span(span.clone())),
     }
 }
 
@@ -5938,7 +6083,7 @@ fn infer_integer_binop(
         (InferTy::Var(_), InferTy::Var(_)) => {
             ctx.unify(&a_res, &b_res, op_sp)?;
             let merged = ctx.resolve(&a_res);
-            ctx.int_constraints
+            ctx.numeric_constraints
                 .push((merged.clone(), op_sp.clone()));
             return Ok((merged, vec![]));
         }
@@ -5970,7 +6115,7 @@ fn infer_integer_binop(
             if let InferTy::Vec(inner) = &vec_ty {
                 let inner_res = ctx.resolve(inner);
                 if matches!(inner_res, InferTy::Var(_)) {
-                    ctx.int_constraints
+                    ctx.numeric_constraints
                         .push((inner_res.clone(), op_sp.clone()));
                 }
             }
@@ -5981,7 +6126,7 @@ fn infer_integer_binop(
         } else {
             b_res.clone()
         };
-        ctx.int_constraints
+        ctx.numeric_constraints
             .push((merged.clone(), op_sp.clone()));
         return Ok((merged, vec![]));
     }
@@ -6080,7 +6225,11 @@ fn integer_binop(a: &Ty, b: &Ty, a_sp: &Span, b_sp: &Span) -> Result<(Ty, Vec<Ca
         ));
     }
 
-    let out = if a == b { a.clone() } else { Ty::Named("i64".to_string()) };
+    let out = if a == b {
+        a.clone()
+    } else {
+        Ty::Named("i64".to_string())
+    };
     let mut casts = Vec::new();
     if out.rust() != a.rust() {
         casts.push(CastHint {
@@ -6129,8 +6278,7 @@ fn numeric_scalar_binop(a: &Ty, b: &Ty) -> Result<Ty, String> {
 fn is_numeric_name(name: &str) -> bool {
     matches!(
         name,
-        "i8"
-            | "i16"
+        "i8" | "i16"
             | "i32"
             | "i64"
             | "i128"
@@ -6146,11 +6294,18 @@ fn is_numeric_name(name: &str) -> bool {
     )
 }
 
+fn is_numeric(t: &Ty) -> bool {
+    if let Ty::Named(name) = t {
+        is_numeric_name(name)
+    } else {
+        false
+    }
+}
+
 fn is_integer_name(name: &str) -> bool {
     matches!(
         name,
-        "i8"
-            | "i16"
+        "i8" | "i16"
             | "i32"
             | "i64"
             | "i128"
@@ -6162,10 +6317,6 @@ fn is_integer_name(name: &str) -> bool {
             | "usize"
             | "isize"
     )
-}
-
-fn is_numeric(t: &Ty) -> bool {
-    matches!(t, Ty::Named(s) if is_numeric_name(s))
 }
 
 fn is_integer(t: &Ty) -> bool {
@@ -6187,8 +6338,7 @@ fn check_numeric_constraints(ctx: &mut InferCtx, keep_vars: &BTreeSet<u32>) -> D
             if keep_vars.contains(&id) {
                 continue;
             }
-            ctx.subs
-                .insert(id, InferTy::Named("i64".to_string()));
+            ctx.subs.insert(id, InferTy::Named("i64".to_string()));
             continue;
         }
         let concrete = infer_to_ty(ctx, &resolved).ok_or_else(|| {
@@ -6213,8 +6363,7 @@ fn check_int_constraints(ctx: &mut InferCtx, keep_vars: &BTreeSet<u32>) -> DslRe
             if keep_vars.contains(&id) {
                 continue;
             }
-            ctx.subs
-                .insert(id, InferTy::Named("i64".to_string()));
+            ctx.subs.insert(id, InferTy::Named("i64".to_string()));
             continue;
         }
         if let InferTy::Named(name) = &resolved {
@@ -6222,9 +6371,7 @@ fn check_int_constraints(ctx: &mut InferCtx, keep_vars: &BTreeSet<u32>) -> DslRe
                 continue;
             }
         }
-        return Err(
-            Diag::new("index expects integer type").with_span(span.clone())
-        );
+        return Err(Diag::new("index expects integer type").with_span(span.clone()));
     }
     Ok(())
 }

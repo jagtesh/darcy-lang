@@ -1,3 +1,10 @@
 [workspace]
-members = ["dslc", "crates/darcy-lsp"]
+members = [
+    "dslc",
+    "crates/cargo-darcy",
+    "crates/darcy-build",
+    "crates/darcy-stdlib",
+    "crates/darcy-lsp",
+    "crates/darcy-runtime", "fractal-generator",
+]
 resolver = "2"

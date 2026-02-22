@@ -1,7 +1,14 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::{Def, Expr, FnDef, Ty};
 use crate::diag::Span;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParamMode {
+    ByVal,
+    ByRef,
+    ByRefNoAmp,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SpanKey {
@@ -24,35 +31,29 @@ pub struct CastHint {
     pub target: Ty,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GenericBound {
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    PartialOrd,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Len,
+    IsEmpty,
+    Push(Ty),
+    FromInt,
+}
+
 #[derive(Debug, Clone)]
 pub struct TypedExpr {
     pub expr: Expr,
     pub ty: Ty,
     pub casts: Vec<CastHint>,
     pub types: BTreeMap<SpanKey, Ty>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ParamMode {
-    ByVal,
-    ByRef,
-    ByRefNoAmp,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GenericBound {
-    Copy,
-    Clone,
-    Add,
-    Sub,
-    Mul,
-    Div,
-    PartialEq,
-    PartialOrd,
-    Len,
-    IsEmpty,
-    Push(Ty),
-    FromInt,
 }
 
 #[derive(Debug, Clone)]
@@ -62,7 +63,7 @@ pub struct TypedFn {
     pub param_modes: BTreeMap<String, ParamMode>,
     pub generic_bounds: BTreeMap<u32, Vec<GenericBound>>,
     pub body: TypedExpr,
-    pub mutated: std::collections::BTreeSet<String>,
+    pub mutated: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone)]

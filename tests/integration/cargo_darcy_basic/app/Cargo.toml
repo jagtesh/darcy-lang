@@ -1,0 +1,9 @@
+[package]
+name = "darcy_app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+darcy_lib = { path = "../darcy-lib", features = ["darcy-compiled"] }
+
+[workspace]

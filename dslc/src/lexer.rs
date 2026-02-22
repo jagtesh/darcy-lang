@@ -8,6 +8,13 @@ pub enum TokKind {
     RBrack,
     LBrace,
     RBrace,
+    LSet,
+    Quote,
+    SyntaxQuote,
+    Unquote,
+    UnquoteSplicing,
+    Meta,
+    Discard,
     Sym(String),
     Str(String),
     Int(i64),
@@ -21,11 +28,11 @@ pub struct Tok {
 }
 
 fn is_sym_start(c: char) -> bool {
-    c.is_ascii_alphabetic() || "_:+-*/<>=!?".contains(c)
+    c.is_ascii_alphabetic() || "_:+-*/<>=!?&|.".contains(c)
 }
 
 fn is_sym_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || "_+-*/<>=!?.".contains(c) || c == ':' || c == '/' || c == ','
+    c.is_ascii_alphanumeric() || "_+-*/<>=!?&|.".contains(c) || c == ':' || c == '/' || c == '#'
 }
 
 pub fn lex(input: &str) -> DslResult<Vec<Tok>> {
@@ -48,6 +55,18 @@ pub fn lex(input: &str) -> DslResult<Vec<Tok>> {
                 i += ch.len_utf8();
                 col += 1;
             }
+            continue;
+        }
+        if c == '#' && i + 1 < bytes.len() && input[i + 1..].chars().next() == Some('_') {
+            i += 2;
+            col += 2;
+            toks.push(Tok {
+                kind: TokKind::Discard,
+                span: Span {
+                    start,
+                    end: Loc { line, col, byte: i },
+                },
+            });
             continue;
         }
         if c == '#' && i + 1 < bytes.len() && input[i + 1..].chars().next() == Some('|') {
@@ -77,6 +96,23 @@ pub fn lex(input: &str) -> DslResult<Vec<Tok>> {
                     end: Loc { line, col, byte: i },
                 }));
             }
+            continue;
+        }
+        if c == '#' && i + 1 < bytes.len() && input[i + 1..].chars().next() == Some('{') {
+            i += 2;
+            col += 2;
+            toks.push(Tok {
+                kind: TokKind::LSet,
+                span: Span {
+                    start,
+                    end: Loc { line, col, byte: i },
+                },
+            });
+            continue;
+        }
+        if c == ',' {
+            i += 1;
+            col += 1;
             continue;
         }
         if c.is_whitespace() {
@@ -122,6 +158,32 @@ pub fn lex(input: &str) -> DslResult<Vec<Tok>> {
                 col += 1;
                 TokKind::RBrace
             }
+            '\'' => {
+                i += 1;
+                col += 1;
+                TokKind::Quote
+            }
+            '`' => {
+                i += 1;
+                col += 1;
+                TokKind::SyntaxQuote
+            }
+            '~' => {
+                if i + 1 < bytes.len() && input[i + 1..].chars().next() == Some('@') {
+                    i += 2;
+                    col += 2;
+                    TokKind::UnquoteSplicing
+                } else {
+                    i += 1;
+                    col += 1;
+                    TokKind::Unquote
+                }
+            }
+            '^' => {
+                i += 1;
+                col += 1;
+                TokKind::Meta
+            }
             '"' => {
                 i += 1;
                 col += 1;
@@ -137,12 +199,10 @@ pub fn lex(input: &str) -> DslResult<Vec<Tok>> {
                     }
                     if ch == '\\' {
                         if i + 1 >= bytes.len() {
-                            return Err(
-                                Diag::new("unterminated string escape").with_span(Span {
-                                    start,
-                                    end: Loc { line, col, byte: i },
-                                }),
-                            );
+                            return Err(Diag::new("unterminated string escape").with_span(Span {
+                                start,
+                                end: Loc { line, col, byte: i },
+                            }));
                         }
                         let next = input[i + 1..].chars().next().unwrap();
                         match next {
@@ -152,12 +212,14 @@ pub fn lex(input: &str) -> DslResult<Vec<Tok>> {
                             '\\' => s.push('\\'),
                             '"' => s.push('"'),
                             _ => {
-                                return Err(
-                                    Diag::new("unknown string escape").with_span(Span {
-                                        start,
-                                        end: Loc { line, col, byte: i + 2 },
-                                    }),
-                                )
+                                return Err(Diag::new("unknown string escape").with_span(Span {
+                                    start,
+                                    end: Loc {
+                                        line,
+                                        col,
+                                        byte: i + 2,
+                                    },
+                                }))
                             }
                         }
                         i += 2;
@@ -165,24 +227,20 @@ pub fn lex(input: &str) -> DslResult<Vec<Tok>> {
                         continue;
                     }
                     if ch == '\n' {
-                        return Err(
-                            Diag::new("unterminated string literal").with_span(Span {
-                                start,
-                                end: Loc { line, col, byte: i },
-                            }),
-                        );
+                        return Err(Diag::new("unterminated string literal").with_span(Span {
+                            start,
+                            end: Loc { line, col, byte: i },
+                        }));
                     }
                     s.push(ch);
                     i += ch.len_utf8();
                     col += 1;
                 }
                 if !closed {
-                    return Err(
-                        Diag::new("unterminated string literal").with_span(Span {
-                            start,
-                            end: Loc { line, col, byte: i },
-                        }),
-                    );
+                    return Err(Diag::new("unterminated string literal").with_span(Span {
+                        start,
+                        end: Loc { line, col, byte: i },
+                    }));
                 }
                 TokKind::Str(s)
             }
@@ -236,8 +294,25 @@ pub fn lex(input: &str) -> DslResult<Vec<Tok>> {
                     }
                 } else if is_sym_start(c) {
                     let mut j = i;
+                    let mut type_depth = 0u32;
                     while j < bytes.len() {
                         let ch = input[j..].chars().next().unwrap();
+                        if ch == '<' {
+                            type_depth += 1;
+                            j += ch.len_utf8();
+                            continue;
+                        }
+                        if ch == '>' {
+                            if type_depth > 0 {
+                                type_depth -= 1;
+                            }
+                            j += ch.len_utf8();
+                            continue;
+                        }
+                        if ch == ',' && type_depth > 0 {
+                            j += ch.len_utf8();
+                            continue;
+                        }
                         if is_sym_char(ch) {
                             j += ch.len_utf8();
                         } else {
@@ -249,16 +324,16 @@ pub fn lex(input: &str) -> DslResult<Vec<Tok>> {
                     col += s.chars().count();
                     TokKind::Sym(s.to_string())
                 } else {
-                    return Err(Diag::new(format!("unexpected character: '{}'", c)).with_span(
-                        Span {
+                    return Err(
+                        Diag::new(format!("unexpected character: '{}'", c)).with_span(Span {
                             start,
                             end: Loc {
                                 line,
                                 col,
                                 byte: i + c.len_utf8(),
                             },
-                        },
-                    ));
+                        }),
+                    );
                 }
             }
         };

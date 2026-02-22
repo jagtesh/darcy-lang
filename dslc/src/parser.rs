@@ -1,6 +1,6 @@
+use crate::diag::Span;
 use crate::diag::{Diag, DslResult};
 use crate::lexer::{Tok, TokKind};
-use crate::diag::Span;
 
 #[derive(Debug, Clone)]
 pub enum Sexp {
@@ -8,6 +8,7 @@ pub enum Sexp {
     List(Vec<Sexp>, Span),
     Brack(Vec<Sexp>, Span),
     Brace(Vec<Sexp>, Span),
+    Set(Vec<Sexp>, Span),
 }
 
 pub struct Parser {
@@ -52,20 +53,61 @@ impl Parser {
     }
 
     fn parse_one(&mut self) -> DslResult<Sexp> {
-        let t = self
-            .peek()
-            .ok_or_else(|| Diag::new("unexpected end of input"))?
-            .clone();
-        match &t.kind {
-            TokKind::LParen => self.parse_list(),
-            TokKind::LBrack => self.parse_brack(),
-            TokKind::LBrace => self.parse_brace(),
-            TokKind::RParen | TokKind::RBrack | TokKind::RBrace => {
-                Err(Diag::new("unexpected closing delimiter").with_span(t.span))
-            }
-            _ => {
-                let t = self.bump().unwrap();
-                Ok(Sexp::Atom(t.kind, t.span))
+        loop {
+            let t = self
+                .peek()
+                .ok_or_else(|| Diag::new("unexpected end of input"))?
+                .clone();
+            match &t.kind {
+                TokKind::Discard => {
+                    let discard = self.bump().unwrap();
+                    let _ = self.parse_one().map_err(|_| {
+                        Diag::new("discard must be followed by a form").with_span(discard.span)
+                    })?;
+                    continue;
+                }
+                TokKind::Quote
+                | TokKind::SyntaxQuote
+                | TokKind::Unquote
+                | TokKind::UnquoteSplicing => {
+                    let quote = self.bump().unwrap();
+                    let inner = self.parse_one()?;
+                    let head = match quote.kind {
+                        TokKind::Quote => "quote",
+                        TokKind::SyntaxQuote => "syntax-quote",
+                        TokKind::Unquote => "unquote",
+                        TokKind::UnquoteSplicing => "unquote-splicing",
+                        _ => "quote",
+                    };
+                    let span = Span {
+                        start: quote.span.start,
+                        end: sexp_span(&inner).end,
+                    };
+                    let quote_atom = Sexp::Atom(TokKind::Sym(head.to_string()), quote.span);
+                    return Ok(Sexp::List(vec![quote_atom, inner], span));
+                }
+                TokKind::Meta => {
+                    let meta = self.bump().unwrap();
+                    let meta_form = self.parse_one()?;
+                    let form = self.parse_one()?;
+                    let span = Span {
+                        start: meta.span.start,
+                        end: sexp_span(&form).end,
+                    };
+                    let head = Sexp::Atom(TokKind::Sym("with-meta".to_string()), meta.span);
+                    return Ok(Sexp::List(vec![head, form, meta_form], span));
+                }
+                TokKind::LParen => return self.parse_list(),
+                TokKind::LBrack => return self.parse_brack(),
+                TokKind::LBrace => return self.parse_brace(),
+                TokKind::LSet => return self.parse_set(),
+                TokKind::RParen | TokKind::RBrack | TokKind::RBrace => {
+                    return Err(Diag::new("unexpected closing delimiter").with_span(t.span))
+                }
+                _ => {
+                    let t = self.bump().unwrap();
+                    return Ok(Sexp::Atom(t.kind, t.span));
+                }
             }
         }
     }
@@ -125,5 +167,34 @@ impl Parser {
             }
         }
         Err(Diag::new("unclosed '{'").with_span(open.span))
+    }
+
+    fn parse_set(&mut self) -> DslResult<Sexp> {
+        let open = self.expect(TokKind::LSet)?;
+        let mut items = Vec::new();
+        while let Some(t) = self.peek() {
+            match t.kind {
+                TokKind::RBrace => {
+                    let close = self.bump().unwrap();
+                    let span = Span {
+                        start: open.span.start,
+                        end: close.span.end,
+                    };
+                    return Ok(Sexp::Set(items, span));
+                }
+                _ => items.push(self.parse_one()?),
+            }
+        }
+        Err(Diag::new("unclosed '#{'").with_span(open.span))
+    }
+}
+
+fn sexp_span(se: &Sexp) -> Span {
+    match se {
+        Sexp::Atom(_, sp) => sp.clone(),
+        Sexp::List(_, sp) => sp.clone(),
+        Sexp::Brack(_, sp) => sp.clone(),
+        Sexp::Brace(_, sp) => sp.clone(),
+        Sexp::Set(_, sp) => sp.clone(),
     }
 }

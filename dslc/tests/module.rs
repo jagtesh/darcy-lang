@@ -10,7 +10,12 @@ fn temp_root(tag: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("time")
         .as_nanos();
-    dir.push(format!("dslc_module_{}_{}_{}", tag, std::process::id(), nanos));
+    dir.push(format!(
+        "dslc_module_{}_{}_{}",
+        tag,
+        std::process::id(),
+        nanos
+    ));
     fs::create_dir_all(&dir).expect("create temp dir");
     dir
 }
@@ -22,8 +27,10 @@ fn use_with_alias_prefix() {
     fs::create_dir_all(&lib_dir).expect("create lib dir");
     fs::write(lib_dir.join("math.dsl"), "(defn inc [x:i32] (+ x 1))").expect("write module");
 
-    let src = "(use math :as m) (defn main [] (m/inc 1))";
-    let out = compile_with_modules(&root.join("main.dsl"), src, &[lib_dir]).expect("compile ok");
+    let src = "(require [math :as m]) (defn main [] (m/inc 1))";
+    let out = compile_with_modules(&root.join("main.dsl"), src, &[lib_dir])
+        .expect("compile ok")
+        .rust;
     assert!(out.contains("fn main"));
 }
 
@@ -34,8 +41,10 @@ fn open_imports_all() {
     fs::create_dir_all(&lib_dir).expect("create lib dir");
     fs::write(lib_dir.join("math.dsl"), "(defn inc [x:i32] (+ x 1))").expect("write module");
 
-    let src = "(open math) (defn main [] (inc 1))";
-    let out = compile_with_modules(&root.join("main.dsl"), src, &[lib_dir]).expect("compile ok");
+    let src = "(require [math :refer :all]) (defn main [] (inc 1))";
+    let out = compile_with_modules(&root.join("main.dsl"), src, &[lib_dir])
+        .expect("compile ok")
+        .rust;
     assert!(out.contains("fn main"));
 }
 
@@ -46,8 +55,10 @@ fn use_only_imports_selected() {
     fs::create_dir_all(&lib_dir).expect("create lib dir");
     fs::write(lib_dir.join("math.dsl"), "(defn inc [x:i32] (+ x 1))").expect("write module");
 
-    let src = "(use math :only (inc)) (defn main [] (inc 1))";
-    let out = compile_with_modules(&root.join("main.dsl"), src, &[lib_dir]).expect("compile ok");
+    let src = "(require [math :refer [inc]]) (defn main [] (inc 1))";
+    let out = compile_with_modules(&root.join("main.dsl"), src, &[lib_dir])
+        .expect("compile ok")
+        .rust;
     assert!(out.contains("fn main"));
 }
 
@@ -58,8 +69,9 @@ fn use_only_rejects_missing_names() {
     fs::create_dir_all(&lib_dir).expect("create lib dir");
     fs::write(lib_dir.join("math.dsl"), "(defn inc [x:i32] (+ x 1))").expect("write module");
 
-    let src = "(use math :only (inc)) (defn main [] (dec 1))";
-    let err = compile_with_modules(&root.join("main.dsl"), src, &[lib_dir]).expect_err("expected error");
+    let src = "(require [math :refer [inc]]) (defn main [] (dec 1))";
+    let err =
+        compile_with_modules(&root.join("main.dsl"), src, &[lib_dir]).expect_err("expected error");
     assert!(err.message.contains("unresolved name 'dec'"));
 }
 
@@ -71,23 +83,44 @@ fn dotted_module_prefix() {
     fs::create_dir_all(&acme_dir).expect("create acme dir");
     fs::write(acme_dir.join("io.dsl"), "(defn echo [x:i32] x)").expect("write module");
 
-    let src = "(use acme.io) (defn main [] (acme.io/echo 1))";
-    let out = compile_with_modules(&root.join("main.dsl"), src, &[lib_dir]).expect("compile ok");
+    let src = "(require [acme.io]) (defn main [] (acme.io/echo 1))";
+    let out = compile_with_modules(&root.join("main.dsl"), src, &[lib_dir])
+        .expect("compile ok")
+        .rust;
     assert!(out.contains("fn main"));
 }
 
 #[test]
 fn std_io_dbg_builtin_module() {
     let root = temp_root("std_io");
-    let src = "(use std.io) (defn main [] (std.io/dbg 1))";
-    let out = compile_with_modules(&root.join("main.dsl"), src, &[]).expect("compile ok");
+    let src = "(require [darcy.io]) (defn main [] (darcy.io/dbg 1))";
+    let out = compile_with_modules(&root.join("main.dsl"), src, &[])
+        .expect("compile ok")
+        .rust;
     assert!(out.contains("println!"));
 }
 
 #[test]
 fn open_core_fmt_print() {
     let root = temp_root("core_fmt");
-    let src = "(open core.fmt) (defn main [] (print \"hi\"))";
-    let out = compile_with_modules(&root.join("main.dsl"), src, &[]).expect("compile ok");
+    let src = "(require [darcy.fmt :refer [print]]) (defn main [] (print \"hi\"))";
+    let out = compile_with_modules(&root.join("main.dsl"), src, &[])
+        .expect("compile ok")
+        .rust;
     assert!(out.contains("print!"), "{}", out);
+}
+
+#[test]
+fn require_multiple_specs() {
+    let root = temp_root("multi");
+    let lib_dir = root.join("lib");
+    fs::create_dir_all(&lib_dir).expect("create lib dir");
+    fs::write(lib_dir.join("math.dsl"), "(defn inc [x:i32] (+ x 1))").expect("write module");
+    fs::write(lib_dir.join("util.dsl"), "(defn dec [x:i32] (- x 1))").expect("write module");
+
+    let src = "(require [math :as m] [util :as u]) (defn main [] (+ (m/inc 1) (u/dec 2)))";
+    let out = compile_with_modules(&root.join("main.dsl"), src, &[lib_dir])
+        .expect("compile ok")
+        .rust;
+    assert!(out.contains("fn main"));
 }

@@ -1,5 +1,6 @@
 use serde::Deserialize;
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct Defs {
     pub language_id: String,

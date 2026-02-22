@@ -55,7 +55,11 @@ fn sample_series(n: usize) -> Vec<f64> {
 fn dsl_equiv(values: &[f64], threshold: f64) -> f64 {
     let sma = simple_sma(values, 10);
     let last = *sma.last().unwrap_or(&0.0);
-    if last > threshold { last } else { 0.0 }
+    if last > threshold {
+        last
+    } else {
+        0.0
+    }
 }
 
 fn simple_sma(values: &[f64], period: usize) -> Vec<f64> {
@@ -69,7 +73,11 @@ fn simple_sma(values: &[f64], period: usize) -> Vec<f64> {
         if i >= period {
             sum -= values[i - period];
         }
-        let denom = if i + 1 < period { (i + 1) as f64 } else { period as f64 };
+        let denom = if i + 1 < period {
+            (i + 1) as f64
+        } else {
+            period as f64
+        };
         out.push(sum / denom);
     }
     out
@@ -90,20 +98,25 @@ fn cel_equiv(values: &[f64], threshold: f64) -> f64 {
 
     let ctx = CONTEXT.get_or_init(|| {
         let mut ctx = Context::default();
-        ctx.add_variable("values", values.to_vec()).expect("cel values");
-        ctx.add_variable("threshold", threshold).expect("cel threshold");
-        ctx.add_function("last_sma", |vals: std::sync::Arc<Vec<Value>>, period: i64| -> f64 {
-            let mut out = Vec::with_capacity(vals.len());
-            for v in vals.iter() {
-                match v {
-                    Value::Float(f) => out.push(*f),
-                    Value::Int(i) => out.push(*i as f64),
-                    _ => return 0.0,
+        ctx.add_variable("values", values.to_vec())
+            .expect("cel values");
+        ctx.add_variable("threshold", threshold)
+            .expect("cel threshold");
+        ctx.add_function(
+            "last_sma",
+            |vals: std::sync::Arc<Vec<Value>>, period: i64| -> f64 {
+                let mut out = Vec::with_capacity(vals.len());
+                for v in vals.iter() {
+                    match v {
+                        Value::Float(f) => out.push(*f),
+                        Value::Int(i) => out.push(*i as f64),
+                        _ => return 0.0,
+                    }
                 }
-            }
-            let sma = simple_sma(&out, period as usize);
-            *sma.last().unwrap_or(&0.0)
-        });
+                let sma = simple_sma(&out, period as usize);
+                *sma.last().unwrap_or(&0.0)
+            },
+        );
         ctx
     });
 

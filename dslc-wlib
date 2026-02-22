@@ -1,0 +1,23 @@
+#!/bin/bash
+
+if [[ ! -f './Cargo.toml' ]]; then
+	echo 'error: must run this from repo root'
+	exit 1
+fi
+
+if [[ $# -eq 1 ]]; then
+	cargo run --bin dslc -- "$1" -L "$PWD/crates/darcy-stdlib/darcy"
+elif [[ $# -eq 2 ]]; then
+	if [[ "$1" == "run" ]] || [[ "$1" == "build" ]]; then
+		cargo run --bin dslc -- "$@" -L "$PWD/crates/darcy-stdlib/darcy"
+	else
+		echo "error: first argument must be 'run' or 'build' when 2 arguments are provided"
+		exit 1
+	fi
+elif [[ $# -gt 2 ]]; then
+	echo "error: to compile multiple files, please create a new crate and then use cargo run in the crate"
+	exit 1
+else
+	echo "error: no arguments provided"
+	exit 1
+fi

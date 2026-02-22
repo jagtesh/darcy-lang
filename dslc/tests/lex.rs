@@ -25,7 +25,7 @@ fn lexes_basic_form() {
 
 #[test]
 fn lexes_string_escapes() {
-    let src = "(dbg \"a\\n\\t\\\"b\\\\\")";
+    let src = "(darcy.io/dbg \"a\\n\\t\\\"b\\\\\")";
     let toks = lex(src).expect("lex ok");
     let mut found = false;
     for t in toks {
@@ -50,4 +50,30 @@ fn lexes_braces() {
         TokKind::RBrace,
     ];
     assert_eq!(kinds, expected);
+}
+
+#[test]
+fn lexes_sets() {
+    let src = "#{:a 1}";
+    let toks = lex(src).expect("lex ok");
+    let kinds: Vec<TokKind> = toks.into_iter().map(|t| t.kind).collect();
+    let expected = vec![
+        TokKind::LSet,
+        TokKind::Sym(":a".to_string()),
+        TokKind::Int(1),
+        TokKind::RBrace,
+    ];
+    assert_eq!(kinds, expected);
+}
+
+#[test]
+fn lexes_reader_macros() {
+    let src = "`(list ~a ~@b) ^:meta x";
+    let toks = lex(src).expect("lex ok");
+    assert!(toks.iter().any(|t| matches!(t.kind, TokKind::SyntaxQuote)));
+    assert!(toks.iter().any(|t| matches!(t.kind, TokKind::Unquote)));
+    assert!(toks
+        .iter()
+        .any(|t| matches!(t.kind, TokKind::UnquoteSplicing)));
+    assert!(toks.iter().any(|t| matches!(t.kind, TokKind::Meta)));
 }

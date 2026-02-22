@@ -65,3 +65,61 @@ fn parses_case_alias() {
         _ => panic!("expected function"),
     }
 }
+
+#[test]
+fn parses_cond_and_set_literals() {
+    let src = "(defn demo [x:i32] (cond (true (hashset 1 2)) (else #{3 4})))";
+    let toks = lex(src).expect("lex ok");
+    let mut parser = Parser::new(toks);
+    let sexps = parser.parse_all().expect("parse sexps");
+    let tops = parse_toplevel(&sexps).expect("parse toplevel");
+
+    match &tops[0] {
+        Top::Func(fd) => match &fd.body {
+            Expr::If { .. } => {}
+            _ => panic!("expected cond to lower to if"),
+        },
+        _ => panic!("expected function"),
+    }
+}
+
+#[test]
+fn rejects_cond_else_not_last() {
+    let src = "(defn demo [x:i32] (cond (else 1) (true 2)))";
+    let toks = lex(src).expect("lex ok");
+    let mut parser = Parser::new(toks);
+    let sexps = parser.parse_all().expect("parse sexps");
+    let err = parse_toplevel(&sexps).expect_err("expected error");
+    assert!(err.message.contains("else"), "{}", err.message);
+}
+
+#[test]
+fn parses_discard_reader() {
+    let src = "(defn main [] (do 1 #_ 2 3))";
+    let toks = lex(src).expect("lex ok");
+    let mut parser = Parser::new(toks);
+    let sexps = parser.parse_all().expect("parse sexps");
+    let tops = parse_toplevel(&sexps).expect("parse toplevel");
+
+    match &tops[0] {
+        Top::Func(fd) => match &fd.body {
+            Expr::Do { exprs, .. } => {
+                assert_eq!(exprs.len(), 2);
+                assert!(matches!(exprs[0], Expr::Int(1, _)));
+                assert!(matches!(exprs[1], Expr::Int(3, _)));
+            }
+            _ => panic!("expected do"),
+        },
+        _ => panic!("expected function"),
+    }
+}
+
+#[test]
+fn parses_commas_as_whitespace() {
+    let src = "(defn main [] (list 1, 2, 3))";
+    let toks = lex(src).expect("lex ok");
+    let mut parser = Parser::new(toks);
+    let sexps = parser.parse_all().expect("parse sexps");
+    let tops = parse_toplevel(&sexps).expect("parse toplevel");
+    assert_eq!(tops.len(), 1);
+}

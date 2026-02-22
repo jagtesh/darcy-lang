@@ -1,10 +1,9 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use dslc::{Diag, Span};
 use dslc::{lex, Tok, TokKind};
-use dslc::Parser;
-use dslc::{parse_toplevel, typecheck_tops};
+use dslc::{read_expand_toplevel, typecheck_tops};
+use dslc::{Diag, Span};
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
@@ -131,9 +130,7 @@ impl Backend {
 impl LanguageServer for Backend {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
         let caps = ServerCapabilities {
-            text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                TextDocumentSyncKind::FULL,
-            )),
+            text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
             hover_provider: Some(HoverProviderCapability::Simple(true)),
             completion_provider: Some(CompletionOptions {
                 resolve_provider: Some(false),
@@ -207,7 +204,10 @@ impl LanguageServer for Backend {
                 kind: MarkupKind::Markdown,
                 value: format!("`{}`", ty.rust()),
             });
-            return Ok(Some(Hover { contents, range: None }));
+            return Ok(Some(Hover {
+                contents,
+                range: None,
+            }));
         }
         Ok(None)
     }
@@ -256,10 +256,7 @@ impl LanguageServer for Backend {
         Ok(None)
     }
 
-    async fn formatting(
-        &self,
-        params: DocumentFormattingParams,
-    ) -> Result<Option<Vec<TextEdit>>> {
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         let uri = params.text_document.uri;
         let text = match self.get_doc(&uri).await {
             Some(t) => t,
@@ -273,7 +270,10 @@ impl LanguageServer for Backend {
             start: Position::new(0, 0),
             end: Position::new(u32::MAX, 0),
         };
-        Ok(Some(vec![TextEdit { range, new_text: formatted }]))
+        Ok(Some(vec![TextEdit {
+            range,
+            new_text: formatted,
+        }]))
     }
 }
 
@@ -285,9 +285,7 @@ struct Analysis {
 
 fn analyze(text: &str) -> std::result::Result<Analysis, Diag> {
     let tokens = lex(text)?;
-    let mut parser = Parser::new(tokens.clone());
-    let sexps = parser.parse_all()?;
-    let tops = parse_toplevel(&sexps)?;
+    let tops = read_expand_toplevel(text)?;
     let typechecked = typecheck_tops(&tops)?;
     Ok(Analysis {
         tops,
@@ -311,8 +309,14 @@ fn diag_to_lsp(d: &Diag) -> Diagnostic {
 
 fn span_to_range(span: &Span) -> Range {
     Range {
-        start: Position::new((span.start.line.saturating_sub(1)) as u32, (span.start.col.saturating_sub(1)) as u32),
-        end: Position::new((span.end.line.saturating_sub(1)) as u32, (span.end.col.saturating_sub(1)) as u32),
+        start: Position::new(
+            (span.start.line.saturating_sub(1)) as u32,
+            (span.start.col.saturating_sub(1)) as u32,
+        ),
+        end: Position::new(
+            (span.end.line.saturating_sub(1)) as u32,
+            (span.end.col.saturating_sub(1)) as u32,
+        ),
     }
 }
 

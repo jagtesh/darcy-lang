@@ -1,0 +1,14 @@
+[package]
+name = "trading-engine-example"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+darcy-compiled = []
+default = ["darcy-compiled"]
+
+[dependencies]
+
+[build-dependencies]
+darcy-build = { path = "../../../crates/darcy-build" }
+darcy-stdlib = { path = "../../../crates/darcy-stdlib" }

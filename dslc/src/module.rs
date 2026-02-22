@@ -50,9 +50,7 @@ impl ModuleLoader {
         if self.modules.contains_key(name) {
             return Ok(());
         }
-        let mut p = crate::Parser::new(crate::lex(src)?);
-        let sexps = p.parse_all()?;
-        let tops = crate::parse_toplevel(&sexps)?;
+        let tops = crate::read_expand_toplevel(src)?;
 
         let mut uses = Vec::new();
         let mut items = Vec::new();
@@ -307,6 +305,24 @@ fn resolve_expr(res: &Resolver, e: &Expr) -> DslResult<Expr> {
                 span: span.clone(),
             })
         }
+        Expr::MethodCall {
+            base,
+            method,
+            args,
+            span,
+        } => {
+            let base = Box::new(resolve_expr(res, base)?);
+            let mut args_out = Vec::new();
+            for a in args {
+                args_out.push(resolve_expr(res, a)?);
+            }
+            Ok(Expr::MethodCall {
+                base,
+                method: method.clone(),
+                args: args_out,
+                span: span.clone(),
+            })
+        }
         Expr::Var(name, span) => {
             if let Some(full) = res.resolve_def_name(name, span) {
                 Ok(Expr::Var(full, span.clone()))
@@ -314,6 +330,16 @@ fn resolve_expr(res: &Resolver, e: &Expr) -> DslResult<Expr> {
                 Ok(e.clone())
             }
         }
+        Expr::Ascribe { expr, ann, span } => Ok(Expr::Ascribe {
+            expr: Box::new(resolve_expr(res, expr)?),
+            ann: resolve_type(res, ann, span)?,
+            span: span.clone(),
+        }),
+        Expr::Cast { expr, ann, span } => Ok(Expr::Cast {
+            expr: Box::new(resolve_expr(res, expr)?),
+            ann: resolve_type(res, ann, span)?,
+            span: span.clone(),
+        }),
         Expr::If {
             cond,
             then_br,
@@ -356,6 +382,11 @@ fn resolve_expr(res: &Resolver, e: &Expr) -> DslResult<Expr> {
             var: var.clone(),
             iter: resolve_iterable(res, iter)?,
             body: Box::new(resolve_expr(res, body)?),
+            span: span.clone(),
+        }),
+        Expr::Set { name, expr, span } => Ok(Expr::Set {
+            name: name.clone(),
+            expr: Box::new(resolve_expr(res, expr)?),
             span: span.clone(),
         }),
         Expr::Let {
@@ -465,59 +496,6 @@ fn resolve_expr(res: &Resolver, e: &Expr) -> DslResult<Expr> {
                 ann,
             })
         }
-        Expr::Field { base, field, span } => Ok(Expr::Field {
-            base: Box::new(resolve_expr(res, base)?),
-            field: field.clone(),
-            span: span.clone(),
-        }),
-        Expr::Ascribe { expr, ann, span } => Ok(Expr::Ascribe {
-            expr: Box::new(resolve_expr(res, expr)?),
-            ann: resolve_type(res, ann, span)?,
-            span: span.clone(),
-        }),
-        Expr::Cast { expr, ann, span } => Ok(Expr::Cast {
-            expr: Box::new(resolve_expr(res, expr)?),
-            ann: resolve_type(res, ann, span)?,
-            span: span.clone(),
-        }),
-        Expr::MethodCall {
-            base,
-            method,
-            args,
-            span,
-        } => {
-            let base = Box::new(resolve_expr(res, base)?);
-            let mut out_args = Vec::new();
-            for a in args {
-                out_args.push(resolve_expr(res, a)?);
-            }
-            Ok(Expr::MethodCall {
-                base,
-                method: method.clone(),
-                args: out_args,
-                span: span.clone(),
-            })
-        }
-        Expr::Set { name, expr, span } => {
-            // Check if it resolves to a local or global? Set expects a name.
-            // If resolve_value_name handles vars, we might need to check if we should resolve the name or if it's a binding reference
-            // Usually set! sets a variable in scope. We might want to fully qualify it if it's a global?
-            // Existing logic for Expr::Var uses resolve_def_name.
-            // Let's assume for now we resolve it if it's a value.
-            // Actually Expr::Set takes a String name. resolve_value_name returns String.
-            let resolved_name = if res.defs.values.contains(name) {
-                qualify(&res.module, name)
-            } else if let Some(full) = res.resolve_def_from_uses(name) {
-                full
-            } else {
-                name.clone()
-            };
-            Ok(Expr::Set {
-                name: resolved_name,
-                expr: Box::new(resolve_expr(res, expr)?),
-                span: span.clone(),
-            })
-        }
         Expr::SetLit { elems, span, ann } => {
             let mut out_elems = Vec::new();
             for el in elems {
@@ -533,6 +511,11 @@ fn resolve_expr(res: &Resolver, e: &Expr) -> DslResult<Expr> {
                 ann,
             })
         }
+        Expr::Field { base, field, span } => Ok(Expr::Field {
+            base: Box::new(resolve_expr(res, base)?),
+            field: field.clone(),
+            span: span.clone(),
+        }),
         _ => Ok(e.clone()),
     }
 }
@@ -638,6 +621,16 @@ fn resolve_inline_def(
 fn inline_subst(expr: &Expr, map: &BTreeMap<String, Expr>) -> Expr {
     match expr {
         Expr::Var(name, _) => map.get(name).cloned().unwrap_or_else(|| expr.clone()),
+        Expr::Ascribe { expr, ann, span } => Expr::Ascribe {
+            expr: Box::new(inline_subst(expr, map)),
+            ann: ann.clone(),
+            span: span.clone(),
+        },
+        Expr::Cast { expr, ann, span } => Expr::Cast {
+            expr: Box::new(inline_subst(expr, map)),
+            ann: ann.clone(),
+            span: span.clone(),
+        },
         Expr::Int(..)
         | Expr::Float(..)
         | Expr::Str(..)
@@ -720,6 +713,11 @@ fn inline_subst(expr: &Expr, map: &BTreeMap<String, Expr>) -> Expr {
             body: Box::new(inline_subst(body, map)),
             span: span.clone(),
         },
+        Expr::Set { name, expr, span } => Expr::Set {
+            name: name.clone(),
+            expr: Box::new(inline_subst(expr, map)),
+            span: span.clone(),
+        },
         Expr::Break { value, span } => Expr::Break {
             value: value.as_ref().map(|v| Box::new(inline_subst(v, map))),
             span: span.clone(),
@@ -759,7 +757,23 @@ fn inline_subst(expr: &Expr, map: &BTreeMap<String, Expr>) -> Expr {
             args: args.iter().map(|a| inline_subst(a, map)).collect(),
             span: span.clone(),
         },
+        Expr::MethodCall {
+            base,
+            method,
+            args,
+            span,
+        } => Expr::MethodCall {
+            base: Box::new(inline_subst(base, map)),
+            method: method.clone(),
+            args: args.iter().map(|a| inline_subst(a, map)).collect(),
+            span: span.clone(),
+        },
         Expr::VecLit { elems, span, ann } => Expr::VecLit {
+            elems: elems.iter().map(|e| inline_subst(e, map)).collect(),
+            span: span.clone(),
+            ann: ann.clone(),
+        },
+        Expr::SetLit { elems, span, ann } => Expr::SetLit {
             elems: elems.iter().map(|e| inline_subst(e, map)).collect(),
             span: span.clone(),
             ann: ann.clone(),
@@ -781,37 +795,6 @@ fn inline_subst(expr: &Expr, map: &BTreeMap<String, Expr>) -> Expr {
                 ann: ann.clone(),
             }
         }
-        Expr::Ascribe { expr, ann, span } => Expr::Ascribe {
-            expr: Box::new(inline_subst(expr, map)),
-            ann: ann.clone(),
-            span: span.clone(),
-        },
-        Expr::Cast { expr, ann, span } => Expr::Cast {
-            expr: Box::new(inline_subst(expr, map)),
-            ann: ann.clone(),
-            span: span.clone(),
-        },
-        Expr::MethodCall {
-            base,
-            method,
-            args,
-            span,
-        } => Expr::MethodCall {
-            base: Box::new(inline_subst(base, map)),
-            method: method.clone(),
-            args: args.iter().map(|a| inline_subst(a, map)).collect(),
-            span: span.clone(),
-        },
-        Expr::Set { name, expr, span } => Expr::Set {
-            name: name.clone(),
-            expr: Box::new(inline_subst(expr, map)),
-            span: span.clone(),
-        },
-        Expr::SetLit { elems, span, ann } => Expr::SetLit {
-            elems: elems.iter().map(|e| inline_subst(e, map)).collect(),
-            span: span.clone(),
-            ann: ann.clone(),
-        },
     }
 }
 
@@ -866,6 +849,7 @@ fn resolve_type(res: &Resolver, ty: &Ty, span: &Span) -> DslResult<Ty> {
             Ok(Ty::Named(full))
         }
         Ty::Vec(inner) => Ok(Ty::Vec(Box::new(resolve_type(res, inner, span)?))),
+        Ty::Set(inner) => Ok(Ty::Set(Box::new(resolve_type(res, inner, span)?))),
         Ty::Option(inner) => Ok(Ty::Option(Box::new(resolve_type(res, inner, span)?))),
         Ty::Result(ok, err) => Ok(Ty::Result(
             Box::new(resolve_type(res, ok, span)?),
@@ -876,7 +860,7 @@ fn resolve_type(res: &Resolver, ty: &Ty, span: &Span) -> DslResult<Ty> {
             Box::new(resolve_type(res, k, span)?),
             Box::new(resolve_type(res, v, span)?),
         )),
-        Ty::Set(inner) => Ok(Ty::Set(Box::new(resolve_type(res, inner, span)?))),
+
         Ty::Generic(_) => Ok(ty.clone()),
         Ty::Union(items) => {
             let mut out = Vec::new();
@@ -892,10 +876,15 @@ fn resolve_type(res: &Resolver, ty: &Ty, span: &Span) -> DslResult<Ty> {
 fn is_primitive_type(name: &str) -> bool {
     matches!(
         name,
-        "i32"
+        "i8" | "i16"
+            | "i32"
             | "i64"
+            | "i128"
+            | "u8"
+            | "u16"
             | "u32"
             | "u64"
+            | "u128"
             | "f32"
             | "f64"
             | "bool"
@@ -917,91 +906,7 @@ fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
         values: BTreeSet::new(),
     };
     std_io.fns.insert("dbg".to_string());
-    out.insert("std.io".to_string(), std_io);
-
-    let mut core_num = ModuleDefs {
-        types: BTreeSet::new(),
-        variants: BTreeSet::new(),
-        fns: BTreeSet::new(),
-        inlines: BTreeSet::new(),
-        values: BTreeSet::new(),
-    };
-    core_num.fns.insert("abs".to_string());
-    core_num.fns.insert("min".to_string());
-    core_num.fns.insert("max".to_string());
-    core_num.fns.insert("clamp".to_string());
-    out.insert("core.num".to_string(), core_num);
-
-    let mut core_vec = ModuleDefs {
-        types: BTreeSet::new(),
-        variants: BTreeSet::new(),
-        fns: BTreeSet::new(),
-        inlines: BTreeSet::new(),
-        values: BTreeSet::new(),
-    };
-    core_vec.fns.insert("len".to_string());
-    core_vec.fns.insert("is-empty".to_string());
-    core_vec.fns.insert("get".to_string());
-    core_vec.fns.insert("set".to_string());
-    out.insert("core.vec".to_string(), core_vec);
-
-    let mut core_str = ModuleDefs {
-        types: BTreeSet::new(),
-        variants: BTreeSet::new(),
-        fns: BTreeSet::new(),
-        inlines: BTreeSet::new(),
-        values: BTreeSet::new(),
-    };
-    core_str.fns.insert("len".to_string());
-    core_str.fns.insert("is-empty".to_string());
-    core_str.fns.insert("trim".to_string());
-    core_str.fns.insert("split".to_string());
-    core_str.fns.insert("join".to_string());
-    out.insert("core.str".to_string(), core_str);
-
-    let mut core_fmt = ModuleDefs {
-        types: BTreeSet::new(),
-        variants: BTreeSet::new(),
-        fns: BTreeSet::new(),
-        inlines: BTreeSet::new(),
-        values: BTreeSet::new(),
-    };
-    core_fmt.fns.insert("dbg".to_string());
-    core_fmt.fns.insert("format".to_string());
-    core_fmt.fns.insert("pretty".to_string());
-    core_fmt.fns.insert("print".to_string());
-    core_fmt.fns.insert("println".to_string());
-    out.insert("core.fmt".to_string(), core_fmt);
-
-    let mut core_option = ModuleDefs {
-        types: BTreeSet::new(),
-        variants: BTreeSet::new(),
-        fns: BTreeSet::new(),
-        inlines: BTreeSet::new(),
-        values: BTreeSet::new(),
-    };
-    core_option.fns.insert("some".to_string());
-    core_option.fns.insert("none".to_string());
-    core_option.fns.insert("is-some".to_string());
-    core_option.fns.insert("is-none".to_string());
-    core_option.fns.insert("unwrap".to_string());
-    core_option.fns.insert("unwrap-or".to_string());
-    out.insert("core.option".to_string(), core_option);
-
-    let mut core_result = ModuleDefs {
-        types: BTreeSet::new(),
-        variants: BTreeSet::new(),
-        fns: BTreeSet::new(),
-        inlines: BTreeSet::new(),
-        values: BTreeSet::new(),
-    };
-    core_result.fns.insert("ok".to_string());
-    core_result.fns.insert("err".to_string());
-    core_result.fns.insert("is-ok".to_string());
-    core_result.fns.insert("is-err".to_string());
-    core_result.fns.insert("unwrap".to_string());
-    core_result.fns.insert("unwrap-or".to_string());
-    out.insert("core.result".to_string(), core_result);
+    out.insert("darcy.io".to_string(), std_io);
 
     let mut core_hashmap = ModuleDefs {
         types: BTreeSet::new(),
@@ -1017,7 +922,7 @@ fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
     core_hashmap.fns.insert("contains".to_string());
     core_hashmap.fns.insert("insert".to_string());
     core_hashmap.fns.insert("remove".to_string());
-    out.insert("core.hashmap".to_string(), core_hashmap);
+    out.insert("darcy.hash-map".to_string(), core_hashmap);
 
     let mut core_btreemap = ModuleDefs {
         types: BTreeSet::new(),
@@ -1033,7 +938,46 @@ fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
     core_btreemap.fns.insert("contains".to_string());
     core_btreemap.fns.insert("insert".to_string());
     core_btreemap.fns.insert("remove".to_string());
-    out.insert("core.btreemap".to_string(), core_btreemap);
+    out.insert("darcy.btree-map".to_string(), core_btreemap);
+
+    let mut core_fmt = ModuleDefs {
+        types: BTreeSet::new(),
+        variants: BTreeSet::new(),
+        fns: BTreeSet::new(),
+        inlines: BTreeSet::new(),
+        values: BTreeSet::new(),
+    };
+    core_fmt.fns.insert("print".to_string());
+    core_fmt.fns.insert("println".to_string());
+    core_fmt.fns.insert("format".to_string());
+    core_fmt.fns.insert("pretty".to_string());
+    out.insert("darcy.fmt".to_string(), core_fmt);
+
+    let mut core_option = ModuleDefs {
+        types: BTreeSet::new(),
+        variants: BTreeSet::new(),
+        fns: BTreeSet::new(),
+        inlines: BTreeSet::new(),
+        values: BTreeSet::new(),
+    };
+    core_option.fns.insert("some".to_string());
+    core_option.fns.insert("none".to_string());
+    core_option.fns.insert("is-some".to_string());
+    core_option.fns.insert("is-none".to_string());
+    out.insert("darcy.option".to_string(), core_option);
+
+    let mut core_result = ModuleDefs {
+        types: BTreeSet::new(),
+        variants: BTreeSet::new(),
+        fns: BTreeSet::new(),
+        inlines: BTreeSet::new(),
+        values: BTreeSet::new(),
+    };
+    core_result.fns.insert("ok".to_string());
+    core_result.fns.insert("err".to_string());
+    core_result.fns.insert("is-ok".to_string());
+    core_result.fns.insert("is-err".to_string());
+    out.insert("darcy.result".to_string(), core_result);
 
     out
 }
@@ -1222,11 +1166,15 @@ impl Resolver {
 }
 
 fn split_qualified(name: &str) -> Option<(&str, &str)> {
-    name.rsplit_once('/')
+    let (prefix, item) = name.rsplit_once('/')?;
+    if prefix.is_empty() || item.is_empty() {
+        return None;
+    }
+    Some((prefix, item))
 }
 
 fn is_builtin_op(name: &str) -> bool {
-    matches!(name, "+" | "-" | "*" | "/" | "dbg")
+    matches!(name, "+" | "-" | "*" | "/")
 }
 
 fn normalize_module_prefix(prefix: &str) -> String {

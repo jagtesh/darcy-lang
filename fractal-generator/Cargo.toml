@@ -1,0 +1,17 @@
+[package]
+name = "fractal-generator"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+darcy-stdlib = { path = "../crates/darcy-stdlib" }
+image = "0.25"
+
+[features]
+darcy-compiled = []
+default = ["darcy-compiled"]
+
+[build-dependencies]
+darcy-build = { path = "../crates/darcy-build" }
+darcy-stdlib = { path = "../crates/darcy-stdlib" }

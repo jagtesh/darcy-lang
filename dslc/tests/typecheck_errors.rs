@@ -25,12 +25,26 @@ fn rejects_missing_field() {
 #[test]
 fn rejects_unconstrained_param() {
     let src = "(defrecord order (qty u32)) (defn total [o] o)";
-    let err = compile(src).expect_err("expected inference error");
+    let out = compile(src).expect("compile ok");
+    assert!(out.contains("fn total<T"), "{}", out);
+}
+
+#[test]
+fn rejects_export_without_concrete_types() {
+    let src = "(export (defn id [x] x))";
+    let err = compile(src).expect_err("expected export boundary error");
     assert!(
-        err.message.contains("cannot infer type for parameter"),
+        err.message.contains("export requires explicit types"),
         "unexpected error: {}",
         err.message
     );
+}
+
+#[test]
+fn allows_export_with_concrete_types() {
+    let src = "(export (defn id [x:i64] x))";
+    let out = compile(src).expect("compile ok");
+    assert!(out.contains("pub fn id(x: i64) -> i64"), "{}", out);
 }
 
 #[test]
@@ -49,7 +63,8 @@ fn rejects_continue_outside_loop() {
     let src = "(defn main [] (continue))";
     let err = compile(src).expect_err("expected type error");
     assert!(
-        err.message.contains("continue is only allowed inside loops"),
+        err.message
+            .contains("continue is only allowed inside loops"),
         "unexpected error: {}",
         err.message
     );

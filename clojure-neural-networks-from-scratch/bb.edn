@@ -1,0 +1,5 @@
+{:tasks
+ {test {:doc "Run tests."
+        :task (clojure "-X:test")}
+  mnist {:doc "Serve a web interface for MNIST digit recognition on localhost."
+         :task (shell {:dir "mnist-scittle"} "bb dev")}}}

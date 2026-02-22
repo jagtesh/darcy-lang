@@ -61,7 +61,7 @@ fn main() {
     }
 
     let src = r#"
-(defstruct order (qty i32) (price f64))
+(defrecord order (qty i32) (price f64))
 (defn total [o] (* o.qty o.price))
 (defn add1 [x] (+ x 1))
 (defn scale [xs:vec<i32>] (* xs 2))
@@ -123,10 +123,14 @@ fn run_compare(mut args: impl Iterator<Item = String>) {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--baseline" => {
-                baseline = Some(PathBuf::from(args.next().expect("--baseline requires a path")));
+                baseline = Some(PathBuf::from(
+                    args.next().expect("--baseline requires a path"),
+                ));
             }
             "--candidate" => {
-                candidate = Some(PathBuf::from(args.next().expect("--candidate requires a path")));
+                candidate = Some(PathBuf::from(
+                    args.next().expect("--candidate requires a path"),
+                ));
             }
             "--max-regression-pct" => {
                 let v = args
@@ -164,10 +168,7 @@ fn run_compare(mut args: impl Iterator<Item = String>) {
 
     if let Some(max_pct) = max_regression_pct {
         if delta > 0.0 && pct > max_pct {
-            eprintln!(
-                "regression: +{:.2}% exceeds max {:.2}%",
-                pct, max_pct
-            );
+            eprintln!("regression: +{:.2}% exceeds max {:.2}%", pct, max_pct);
             std::process::exit(1);
         }
     }
@@ -179,10 +180,14 @@ fn run_update(mut args: impl Iterator<Item = String>) {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--baseline" => {
-                baseline = Some(PathBuf::from(args.next().expect("--baseline requires a path")));
+                baseline = Some(PathBuf::from(
+                    args.next().expect("--baseline requires a path"),
+                ));
             }
             "--candidate" => {
-                candidate = Some(PathBuf::from(args.next().expect("--candidate requires a path")));
+                candidate = Some(PathBuf::from(
+                    args.next().expect("--candidate requires a path"),
+                ));
             }
             _ => {
                 eprintln!("unknown argument: {}", arg);
