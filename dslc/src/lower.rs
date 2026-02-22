@@ -1292,15 +1292,48 @@ fn lower_expr(
             }
             if args.len() == 2
                 && [
-                    "+", "-", "*", "/", "mod", "=", "<", ">", "<=", ">=", "&", "|",
+                    "+",
+                    "-",
+                    "*",
+                    "/",
+                    "mod",
+                    "=",
+                    "<",
+                    ">",
+                    "<=",
+                    ">=",
+                    "&",
+                    "|",
+                    "darcy.op/add",
+                    "darcy.op/sub",
+                    "darcy.op/mul",
+                    "darcy.op/div",
+                    "darcy.op/mod",
+                    "darcy.op/eq",
+                    "darcy.op/lt",
+                    "darcy.op/gt",
+                    "darcy.op/lte",
+                    "darcy.op/gte",
+                    "darcy.op/bit-and",
+                    "darcy.op/bit-or",
                 ]
                 .contains(&op.as_str())
             {
                 let left_ty = expr_ty(types, &args[0].span());
                 let right_ty = expr_ty(types, &args[1].span());
                 let bin_op = match op.as_str() {
-                    "mod" => "%",
-                    "=" => "==",
+                    "mod" | "darcy.op/mod" => "%",
+                    "=" | "darcy.op/eq" => "==",
+                    "darcy.op/add" => "+",
+                    "darcy.op/sub" => "-",
+                    "darcy.op/mul" => "*",
+                    "darcy.op/div" => "/",
+                    "darcy.op/lt" => "<",
+                    "darcy.op/gt" => ">",
+                    "darcy.op/lte" => "<=",
+                    "darcy.op/gte" => ">=",
+                    "darcy.op/bit-and" => "&",
+                    "darcy.op/bit-or" => "|",
                     other => other,
                 };
                 if let (Some(Ty::Vec(_)), Some(right_ty)) = (left_ty.clone(), right_ty.clone()) {

@@ -2839,7 +2839,7 @@ fn collect_bounds_expr(
         }
         Expr::Call { op, args, .. } => {
             match op.as_str() {
-                "+" => {
+                "+" | "darcy.op/add" => {
                     for arg in args {
                         if let Some(ty) = expr_ty(types, arg) {
                             add_bounds_for_ty(ty, bounds, GenericBound::Add);
@@ -2847,7 +2847,7 @@ fn collect_bounds_expr(
                         }
                     }
                 }
-                "-" => {
+                "-" | "darcy.op/sub" => {
                     for arg in args {
                         if let Some(ty) = expr_ty(types, arg) {
                             add_bounds_for_ty(ty, bounds, GenericBound::Sub);
@@ -2855,7 +2855,7 @@ fn collect_bounds_expr(
                         }
                     }
                 }
-                "*" => {
+                "*" | "darcy.op/mul" => {
                     for arg in args {
                         if let Some(ty) = expr_ty(types, arg) {
                             add_bounds_for_ty(ty, bounds, GenericBound::Mul);
@@ -2863,7 +2863,7 @@ fn collect_bounds_expr(
                         }
                     }
                 }
-                "/" => {
+                "/" | "darcy.op/div" => {
                     for arg in args {
                         if let Some(ty) = expr_ty(types, arg) {
                             add_bounds_for_ty(ty, bounds, GenericBound::Div);
@@ -2871,7 +2871,7 @@ fn collect_bounds_expr(
                         }
                     }
                 }
-                "mod" => {
+                "mod" | "darcy.op/mod" => {
                     for arg in args {
                         if let Some(ty) = expr_ty(types, arg) {
                             add_bounds_for_ty(ty, bounds, GenericBound::Copy);
@@ -2885,7 +2885,14 @@ fn collect_bounds_expr(
                         }
                     }
                 }
-                "darcy.op/lt" | "darcy.op/gt" | "<" | ">" | "<=" | ">=" => {
+                "darcy.op/lt"
+                | "darcy.op/gt"
+                | "darcy.op/lte"
+                | "darcy.op/gte"
+                | "<"
+                | ">"
+                | "<="
+                | ">=" => {
                     for arg in args {
                         if let Some(ty) = expr_ty(types, arg) {
                             add_bounds_for_ty(ty, bounds, GenericBound::PartialOrd);
@@ -5218,7 +5225,15 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
-                "darcy.op/gt" | "darcy.op/lt" | "darcy.op/eq" | "=" | "<" | ">" | "<="
+                "darcy.op/gt"
+                | "darcy.op/lt"
+                | "darcy.op/gte"
+                | "darcy.op/lte"
+                | "darcy.op/eq"
+                | "="
+                | "<"
+                | ">"
+                | "<="
                 | ">=" => {
                     if targs.len() != 2 {
                         return Err(Diag::new("'cmp' expects 2 arguments").with_span(span.clone()));
@@ -5234,7 +5249,7 @@ fn infer_expr_type_internal(
                     })
                 }
 
-                "&" | "|" => {
+                "&" | "|" | "darcy.op/bit-and" | "darcy.op/bit-or" => {
                     if targs.len() != 2 {
                         return Err(
                             Diag::new("'bitwise' expects 2 arguments").with_span(span.clone())
@@ -5810,7 +5825,8 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
-                "+" | "-" | "*" | "/" => {
+                "+" | "-" | "*" | "/" | "darcy.op/add" | "darcy.op/sub" | "darcy.op/mul"
+                | "darcy.op/div" => {
                     if targs.len() != 2 {
                         return Err(Diag::new(format!("'{}' expects 2 arguments", op))
                             .with_span(span.clone()));
@@ -5834,7 +5850,7 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
-                "mod" => {
+                "mod" | "darcy.op/mod" => {
                     if targs.len() != 2 {
                         return Err(Diag::new("'mod' expects 2 arguments").with_span(span.clone()));
                     }

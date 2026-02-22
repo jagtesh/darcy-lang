@@ -914,6 +914,27 @@ fn is_primitive_type(name: &str) -> bool {
 fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
     let mut out = BTreeMap::new();
 
+    let mut core_op = ModuleDefs {
+        types: BTreeSet::new(),
+        variants: BTreeSet::new(),
+        fns: BTreeSet::new(),
+        inlines: BTreeSet::new(),
+        values: BTreeSet::new(),
+    };
+    core_op.fns.insert("add".to_string());
+    core_op.fns.insert("sub".to_string());
+    core_op.fns.insert("mul".to_string());
+    core_op.fns.insert("div".to_string());
+    core_op.fns.insert("mod".to_string());
+    core_op.fns.insert("eq".to_string());
+    core_op.fns.insert("lt".to_string());
+    core_op.fns.insert("lte".to_string());
+    core_op.fns.insert("gt".to_string());
+    core_op.fns.insert("gte".to_string());
+    core_op.fns.insert("bit-and".to_string());
+    core_op.fns.insert("bit-or".to_string());
+    out.insert("darcy.op".to_string(), core_op);
+
     let mut std_io = ModuleDefs {
         types: BTreeSet::new(),
         variants: BTreeSet::new(),
