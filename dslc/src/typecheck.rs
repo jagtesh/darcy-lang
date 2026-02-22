@@ -2878,14 +2878,14 @@ fn collect_bounds_expr(
                         }
                     }
                 }
-                "darcy.math/eq" => {
+                "darcy.op/eq" => {
                     for arg in args {
                         if let Some(ty) = expr_ty(types, arg) {
                             add_bounds_for_ty(ty, bounds, GenericBound::PartialEq);
                         }
                     }
                 }
-                "darcy.math/lt" | "darcy.math/gt" | "<" | ">" | "<=" | ">=" => {
+                "darcy.op/lt" | "darcy.op/gt" | "<" | ">" | "<=" | ">=" => {
                     for arg in args {
                         if let Some(ty) = expr_ty(types, arg) {
                             add_bounds_for_ty(ty, bounds, GenericBound::PartialOrd);
@@ -5218,7 +5218,7 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
-                "darcy.math/gt" | "darcy.math/lt" | "darcy.math/eq" | "=" | "<" | ">" | "<="
+                "darcy.op/gt" | "darcy.op/lt" | "darcy.op/eq" | "=" | "<" | ">" | "<="
                 | ">=" => {
                     if targs.len() != 2 {
                         return Err(Diag::new("'cmp' expects 2 arguments").with_span(span.clone()));

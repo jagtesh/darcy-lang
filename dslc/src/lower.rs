@@ -1103,18 +1103,6 @@ fn lower_expr(
             if op == "darcy.math/abs" && args.len() == 1 {
                 return format!("({}).abs()", lower!(&args[0]));
             }
-            if (op == "darcy.math/gt" || op == "darcy.math/lt" || op == "darcy.math/eq")
-                && args.len() == 2
-            {
-                let lhs = lower!(&args[0]);
-                let rhs = lower!(&args[1]);
-                let op_sym = match op.as_str() {
-                    "darcy.math/gt" => ">",
-                    "darcy.math/lt" => "<",
-                    _ => "==",
-                };
-                return format!("({} {} {})", lhs, op_sym, rhs);
-            }
             if op == "darcy.core/clone" && args.len() == 1 {
                 return format!("({}).clone()", lower!(&args[0]));
             }
@@ -1272,18 +1260,6 @@ fn lower_expr(
             }
             if op == "darcy.core/clone" && args.len() == 1 {
                 return format!("({}).clone()", lower!(&args[0]));
-            }
-            if (op == "darcy.math/gt" || op == "darcy.math/lt" || op == "darcy.math/eq")
-                && args.len() == 2
-            {
-                let a = lower!(&args[0]);
-                let b = lower!(&args[1]);
-                let cmp = match op.as_str() {
-                    "darcy.math/gt" => ">",
-                    "darcy.math/lt" => "<",
-                    _ => "==",
-                };
-                return format!("({} {} {})", a, cmp, b);
             }
             if let Some(sd) = structs.get(op) {
                 let rendered: Vec<String> = args.iter().map(|el| lower!(el)).collect();

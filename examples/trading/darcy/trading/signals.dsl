@@ -3,8 +3,8 @@
 
 (defn crossover [fast:f64 slow:f64]
   (cond
-    ((darcy.math/gt fast slow) (signal/buy))
-    ((darcy.math/lt fast slow) (signal/sell))
+    ((darcy.op/gt fast slow) (signal/buy))
+    ((darcy.op/lt fast slow) (signal/sell))
     (else (signal/hold))))
 
 (defn signal-from-closes [closes:vec<f64> fast:i32 slow:i32]

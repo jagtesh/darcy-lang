@@ -15,7 +15,7 @@
   (/ 1.0 (+ 1.0 (darcy.math/exp (- 0.0 x)))))
 
 (defn relu [x:f64]
-  (if (darcy.math/gt x 0.0) x 0.0))
+  (if (darcy.op/gt x 0.0) x 0.0))
 
 (defn softmax [v:vec<f64>]
   (let [exps (darcy.vec/map (fn [x:f64] (darcy.math/exp x)) v)

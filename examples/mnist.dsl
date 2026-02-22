@@ -13,13 +13,13 @@
   (total f64))
 
 (defn argmax-score [v:vec<f64>]
-  (v/fold (fn [acc:f64 x:f64] (if (darcy.math/gt x acc) x acc)) -1.0 v))
+  (v/fold (fn [acc:f64 x:f64] (if (darcy.op/gt x acc) x acc)) -1.0 v))
 
 (defn is-correct [layer:nn/linear-layer s:sample]
   (let [pred (nn/predict layer s.x)
         maxv (argmax-score (darcy.core/clone pred))
         truev (t/vec-dot pred s.y)]
-    (if (darcy.math/eq truev maxv) 1.0 0.0)))
+    (if (darcy.op/eq truev maxv) 1.0 0.0)))
 
 (defn accuracy [layer:nn/linear-layer xs:vec<vec<f64>> ys:vec<vec<f64>>]
   (let [pairs (v/map2 (fn [x y] (sample x y)) xs ys)
@@ -31,7 +31,7 @@
     (/ stats.correct stats.total)))
 
 (defn train-n [state:nn/train-state xs:vec<vec<f64>> ys:vec<vec<f64>> lr:f64 epochs:i32]
-  (if (darcy.math/eq epochs 0)
+  (if (darcy.op/eq epochs 0)
     state
     (train-n
       (nn/train-epoch state.layer (darcy.core/clone xs) (darcy.core/clone ys) lr)

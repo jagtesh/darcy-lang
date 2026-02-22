@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::ast::{Expr, MatchArm, MatchPat, Top, Ty, UseDecl};
-use crate::diag::{Diag, DslResult, Span};
+use crate::diag::{Diag, DslResult, Loc, Span};
 
 #[derive(Debug, Clone)]
 struct ModuleInfo {
@@ -63,6 +63,19 @@ impl ModuleLoader {
                 }
                 _ => items.push(t),
             }
+        }
+        if name != "darcy.core"
+            && name != "darcy.op"
+            && self.find_module_path("darcy.core").is_ok()
+            && !uses.iter().any(|u| u.path == "darcy.core")
+        {
+            uses.push(UseDecl {
+                path: "darcy.core".to_string(),
+                alias: None,
+                only: None,
+                open: true,
+                span: synthetic_span(),
+            });
         }
         let info = ModuleInfo {
             name: name.to_string(),
@@ -299,6 +312,9 @@ fn resolve_expr(res: &Resolver, e: &Expr) -> DslResult<Expr> {
                 args_out.push(resolve_expr(res, a)?);
             }
             let op_res = res.resolve_value_name(op, span)?;
+            if let Some(expanded) = expand_inline_call(res, &op_res, &args_out, span)? {
+                return resolve_expr(res, &expanded);
+            }
             Ok(Expr::Call {
                 op: op_res,
                 args: args_out,
@@ -1033,23 +1049,37 @@ impl Resolver {
     }
 
     fn resolve_value_name(&self, name: &str, span: &Span) -> DslResult<String> {
-        if is_builtin_op(name) {
+        if let Some(alias) = builtin_op_alias(name) {
+            if self.module != "darcy.op" {
+                if self.defs.fns.contains(alias)
+                    || self.defs.types.contains(alias)
+                    || self.defs.variants.contains(alias)
+                {
+                    return Ok(qualify(&self.module, alias));
+                }
+                if let Some(full) = self.resolve_callable_from_uses(alias) {
+                    return Ok(full);
+                }
+            }
+        }
+        let lookup = name;
+        if is_builtin_op(lookup) {
             return Ok(name.to_string());
         }
-        if let Some((prefix, item)) = split_qualified(name) {
+        if let Some((prefix, item)) = split_qualified(lookup) {
             let module = self.resolve_module_prefix(prefix, span)?;
             return Ok(qualify(&module, item));
         }
-        if self.defs.fns.contains(name)
-            || self.defs.types.contains(name)
-            || self.defs.variants.contains(name)
+        if self.defs.fns.contains(lookup)
+            || self.defs.types.contains(lookup)
+            || self.defs.variants.contains(lookup)
         {
-            return Ok(qualify(&self.module, name));
+            return Ok(qualify(&self.module, lookup));
         }
-        if let Some(full) = self.resolve_callable_from_uses(name) {
+        if let Some(full) = self.resolve_callable_from_uses(lookup) {
             return Ok(full);
         }
-        Err(Diag::new(format!("unresolved name '{}'", name)).with_span(span.clone()))
+        Err(Diag::new(format!("unresolved name '{}'", lookup)).with_span(span.clone()))
     }
 
     fn resolve_type_name(&self, name: &str, span: &Span) -> DslResult<String> {
@@ -1165,6 +1195,21 @@ impl Resolver {
     }
 }
 
+fn synthetic_span() -> Span {
+    Span {
+        start: Loc {
+            line: 1,
+            col: 1,
+            byte: 0,
+        },
+        end: Loc {
+            line: 1,
+            col: 1,
+            byte: 0,
+        },
+    }
+}
+
 fn split_qualified(name: &str) -> Option<(&str, &str)> {
     let (prefix, item) = name.rsplit_once('/')?;
     if prefix.is_empty() || item.is_empty() {
@@ -1174,7 +1219,28 @@ fn split_qualified(name: &str) -> Option<(&str, &str)> {
 }
 
 fn is_builtin_op(name: &str) -> bool {
-    matches!(name, "+" | "-" | "*" | "/")
+    matches!(
+        name,
+        "+" | "-" | "*" | "/" | "mod" | "=" | "<" | ">" | "<=" | ">=" | "&" | "|"
+    )
+}
+
+fn builtin_op_alias(name: &str) -> Option<&'static str> {
+    match name {
+        "+" => Some("add"),
+        "-" => Some("sub"),
+        "*" => Some("mul"),
+        "/" => Some("div"),
+        "mod" => Some("mod"),
+        "=" => Some("eq"),
+        "<" => Some("lt"),
+        ">" => Some("gt"),
+        "<=" => Some("lte"),
+        ">=" => Some("gte"),
+        "&" => Some("bit-and"),
+        "|" => Some("bit-or"),
+        _ => None,
+    }
 }
 
 fn normalize_module_prefix(prefix: &str) -> String {

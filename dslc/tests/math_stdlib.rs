@@ -9,7 +9,7 @@ fn math_exp_lowers() {
 
 #[test]
 fn math_cmp_lowers() {
-    let src = "(defn main [] (darcy.math/gt 2 1))";
+    let src = "(defn main [] (> 2 1))";
     let out = compile(src).expect("compile ok");
     assert!(out.contains(">"), "{}", out);
 }

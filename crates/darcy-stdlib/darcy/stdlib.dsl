@@ -1,5 +1,6 @@
 (require [darcy.io])
 (require [darcy.math])
+(require [darcy.op])
 (require [darcy.core])
 (require [darcy.vec])
 (require [darcy.string])

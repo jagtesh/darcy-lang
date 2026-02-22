@@ -431,7 +431,7 @@ Module search paths are:
 
 ### Standard Library Highlights
 
-- Math helpers: `darcy.math/exp`, `darcy.math/gt`, `darcy.math/lt`, `darcy.math/eq`.
+- Math helpers: `darcy.math/exp`, `darcy.op/gt`, `darcy.op/lt`, `darcy.op/eq`.
 - Tensor helpers: `darcy.tensor/*` (vec/matrix ops).
 - NN helpers: `darcy.nn/*` (linear layer, softmax, training helpers).
 

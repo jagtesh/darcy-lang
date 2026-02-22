@@ -38,7 +38,7 @@ What it supports (MVP):
   - local assignment: `(let! name expr)` returns `()`
   - debug print: `(darcy.io/dbg expr)`
   - formatted print: `(darcy.fmt/print (darcy.fmt/format x))`, `(darcy.fmt/println (darcy.fmt/format x))`
-  - math helpers: `(darcy.math/exp x)`, `(darcy.math/gt a b)`, `(darcy.math/lt a b)`, `(darcy.math/eq a b)`
+  - math helpers: `(darcy.math/exp x)`, `(darcy.op/gt a b)`, `(darcy.op/lt a b)`, `(darcy.op/eq a b)`
   - extern wrapper: `(extern (defrecord ...))`, `(extern (defenum ...))`, `(extern (defn name [params] RetType))`
   - rust interop macros: `(require [darcy.rust :refer [defextern defextern-record]])`
   - stdlib modules: `darcy.tensor`, `darcy.nn`, `darcy.mnist`
