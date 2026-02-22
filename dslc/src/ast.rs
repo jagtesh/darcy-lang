@@ -6,12 +6,9 @@ use crate::parser::Sexp;
 pub enum Ty {
     Named(String),
     Vec(Box<Ty>),
-    Set(Box<Ty>),
     Option(Box<Ty>),
     Result(Box<Ty>, Box<Ty>),
     Map(MapKind, Box<Ty>, Box<Ty>),
-    Generic(u32),
-    Union(Vec<Ty>),
     Unknown,
 }
 
@@ -26,7 +23,6 @@ impl Ty {
         match self {
             Ty::Named(s) => s.clone(),
             Ty::Vec(inner) => format!("Vec<{}>", inner.rust()),
-            Ty::Set(inner) => format!("std::collections::HashSet<{}>", inner.rust()),
             Ty::Option(inner) => format!("Option<{}>", inner.rust()),
             Ty::Result(ok, err) => format!("Result<{}, {}>", ok.rust(), err.rust()),
             Ty::Map(kind, k, v) => {
@@ -35,11 +31,6 @@ impl Ty {
                     MapKind::BTree => "std::collections::BTreeMap",
                 };
                 format!("{}<{}, {}>", ty, k.rust(), v.rust())
-            }
-            Ty::Generic(id) => format!("T{}", id),
-            Ty::Union(types) => {
-                let parts: Vec<String> = types.iter().map(|t| t.rust()).collect();
-                format!("({})", parts.join(" | "))
             }
             Ty::Unknown => "_".to_string(),
         }
@@ -103,16 +94,6 @@ pub enum Expr {
     Unit(Span),
     Keyword(String, Span),
     Var(String, Span),
-    Ascribe {
-        expr: Box<Expr>,
-        ann: Ty,
-        span: Span,
-    },
-    Cast {
-        expr: Box<Expr>,
-        ann: Ty,
-        span: Span,
-    },
     VecLit {
         elems: Vec<Expr>,
         span: Span,
@@ -157,11 +138,6 @@ pub enum Expr {
         body: Box<Expr>,
         span: Span,
     },
-    Set {
-        name: String,
-        expr: Box<Expr>,
-        span: Span,
-    },
     For {
         var: String,
         iter: Iterable,
@@ -190,17 +166,6 @@ pub enum Expr {
         args: Vec<Expr>,
         span: Span,
     },
-    MethodCall {
-        base: Box<Expr>,
-        method: String,
-        args: Vec<Expr>,
-        span: Span,
-    },
-    SetLit {
-        elems: Vec<Expr>,
-        span: Span,
-        ann: Option<Ty>,
-    },
     MapLit {
         kind: MapKind,
         entries: Vec<(Expr, Expr)>,
@@ -219,8 +184,6 @@ impl Expr {
             Expr::Unit(s) => s.clone(),
             Expr::Keyword(_, s) => s.clone(),
             Expr::Var(_, s) => s.clone(),
-            Expr::Ascribe { span, .. } => span.clone(),
-            Expr::Cast { span, .. } => span.clone(),
             Expr::VecLit { span, .. } => span.clone(),
             Expr::Pair { span, .. } => span.clone(),
             Expr::Let { span, .. } => span.clone(),
@@ -236,9 +199,6 @@ impl Expr {
             Expr::Field { span, .. } => span.clone(),
             Expr::Match { span, .. } => span.clone(),
             Expr::Call { span, .. } => span.clone(),
-            Expr::MethodCall { span, .. } => span.clone(),
-            Expr::Set { span, .. } => span.clone(),
-            Expr::SetLit { span, .. } => span.clone(),
             Expr::MapLit { span, .. } => span.clone(),
         }
     }
@@ -262,8 +222,6 @@ pub struct FnDef {
     pub span: Span,
     pub extern_: bool,
     pub extern_ret: Option<Ty>,
-    pub specialize: bool,
-    pub exported: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -341,11 +299,6 @@ fn parse_type_from_sym(s: &str) -> Ty {
         let inner_ty = parse_type_from_sym(inner);
         return Ty::Vec(Box::new(inner_ty));
     }
-    if let Some(inner) = parse_generic_inner(s, "set").or_else(|| parse_generic_inner(s, "hashset"))
-    {
-        let inner_ty = parse_type_from_sym(inner);
-        return Ty::Set(Box::new(inner_ty));
-    }
     if let Some(inner) = parse_generic_inner(s, "option") {
         let inner_ty = parse_type_from_sym(inner);
         return Ty::Option(Box::new(inner_ty));
@@ -382,10 +335,7 @@ fn parse_generic_inner<'a>(s: &'a str, name: &str) -> Option<&'a str> {
         return None;
     }
     let (head, tail) = s.split_at(name.len() + 1);
-    if !head[..name.len()].eq_ignore_ascii_case(name)
-        || !head.ends_with('<')
-        || !tail.ends_with('>')
-    {
+    if !head[..name.len()].eq_ignore_ascii_case(name) || !head.ends_with('<') || !tail.ends_with('>') {
         return None;
     }
     Some(&tail[..tail.len() - 1])
@@ -439,17 +389,13 @@ fn is_module_path(prefix: &str) -> bool {
 fn ensure_qualified_name(name: &str, span: &Span, kind: &str) -> DslResult<String> {
     if let Some((prefix, item)) = name.rsplit_once('/') {
         if prefix.is_empty() || item.is_empty() || !is_module_path(prefix) || !is_lisp_ident(item) {
-            return Err(
-                Diag::new(format!("{} must be a qualified name like mod/name", kind))
-                    .with_span(span.clone()),
-            );
+            return Err(Diag::new(format!("{} must be a qualified name like mod/name", kind))
+                .with_span(span.clone()));
         }
         Ok(name.to_string())
     } else {
-        Err(
-            Diag::new(format!("{} must be a qualified name like mod/name", kind))
-                .with_span(span.clone()),
-        )
+        Err(Diag::new(format!("{} must be a qualified name like mod/name", kind))
+            .with_span(span.clone()))
     }
 }
 
@@ -515,26 +461,7 @@ fn parse_type_from_sym_checked(s: &str, sp: &Span) -> DslResult<Ty> {
             }
             Ok(ty)
         }
-        Ty::Set(inner) => {
-            if let Ty::Named(n) = inner.as_ref() {
-                if !is_primitive_type(n) {
-                    let _ = ensure_type_name(n, sp)?;
-                }
-            }
-            Ok(ty.clone())
-        }
-        Ty::Union(items) => {
-            for i in items {
-                if let Ty::Named(n) = i {
-                    if !is_primitive_type(n) {
-                        let _ = ensure_type_name(n, sp)?;
-                    }
-                }
-            }
-            Ok(ty.clone())
-        }
-        Ty::Generic(_) => Ok(ty.clone()),
-        Ty::Unknown => Ok(ty.clone()),
+        Ty::Unknown => Ok(ty),
     }
 }
 
@@ -557,43 +484,17 @@ fn is_lisp_ident(name: &str) -> bool {
 
 fn ensure_lisp_ident(name: &str, span: &Span, kind: &str) -> DslResult<String> {
     if !is_lisp_ident(name) {
-        return Err(Diag::new(format!(
-            "{} must be lowercase lisp-style (kebab-case)",
-            kind
-        ))
-        .with_span(span.clone()));
+        return Err(
+            Diag::new(format!("{} must be lowercase lisp-style (kebab-case)", kind))
+                .with_span(span.clone()),
+        );
     }
     if is_reserved_ident(name) {
-        return Err(Diag::new(format!("'{}' is a reserved keyword", name)).with_span(span.clone()));
+        return Err(
+            Diag::new(format!("'{}' is a reserved keyword", name)).with_span(span.clone()),
+        );
     }
     Ok(name.to_string())
-}
-
-fn ensure_keyword_ident(name: &str, span: &Span) -> DslResult<String> {
-    if name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '?' || c == '!')
-    {
-        return Ok(name.to_string());
-    }
-    Err(Diag::new("invalid keyword identifier").with_span(span.clone()))
-}
-
-fn ensure_member_ident(name: &str, span: &Span) -> DslResult<String> {
-    if name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        if name
-            .chars()
-            .next()
-            .map(|c| c.is_ascii_digit())
-            .unwrap_or(false)
-        {
-            return Err(
-                Diag::new("member identifier cannot start with a digit").with_span(span.clone())
-            );
-        }
-        return Ok(name.to_string());
-    }
-    Err(Diag::new("invalid member identifier").with_span(span.clone()))
 }
 
 fn is_builtin_op(name: &str) -> bool {
@@ -626,10 +527,12 @@ fn is_reserved_ident(name: &str) -> bool {
             | "use"
             | "require"
             | "open"
-            | "true"
-            | "false"
+            | "vec"
             | "range"
             | "range-incl"
+            | "true"
+            | "false"
+            | "nil"
     )
 }
 
@@ -655,14 +558,15 @@ fn rust_type_name(name: &str) -> String {
 pub fn parse_struct(se: &Sexp) -> DslResult<StructDef> {
     let (items, span) = match se {
         Sexp::List(items, span) => (items, span.clone()),
-        _ => return Err(Diag::new("expected (defstruct ...)").with_span(se_span(se))),
+        _ => {
+            return Err(Diag::new("expected (defstruct ...)").with_span(se_span(se)))
+        }
     };
     if items.len() < 2 {
-        return Err(Diag::new("defstruct/defrecord requires a name").with_span(span));
+        return Err(Diag::new("defstruct requires a name").with_span(span));
     }
-    let (head, _) = atom_sym(&items[0]).ok_or_else(|| {
-        Diag::new("expected symbol 'defstruct' or 'defrecord'").with_span(se_span(&items[0]))
-    })?;
+    let (head, _) = atom_sym(&items[0])
+        .ok_or_else(|| Diag::new("expected symbol 'defstruct' or 'defrecord'").with_span(se_span(&items[0])))?;
     if head != "defstruct" && head != "defrecord" {
         return Err(Diag::new("expected 'defstruct' or 'defrecord'").with_span(se_span(&items[0])));
     }
@@ -683,8 +587,9 @@ pub fn parse_struct(se: &Sexp) -> DslResult<StructDef> {
             .ok_or_else(|| Diag::new("expected field name").with_span(se_span(&fitems[0])))?;
         let fname = ensure_lisp_ident(&fname, &fsp, "field name")?;
         let fty = if fitems.len() == 2 {
-            let (fty_s, _) = atom_sym(&fitems[1])
-                .ok_or_else(|| Diag::new("expected field type").with_span(se_span(&fitems[1])))?;
+            let (fty_s, _) = atom_sym(&fitems[1]).ok_or_else(|| {
+                Diag::new("expected field type").with_span(se_span(&fitems[1]))
+            })?;
             parse_type_from_sym_checked(&fty_s, &fspan)?
         } else {
             Ty::Unknown
@@ -718,11 +623,10 @@ pub fn parse_union(se: &Sexp) -> DslResult<UnionDef> {
         _ => return Err(Diag::new("expected (defunion ...)").with_span(se_span(se))),
     };
     if items.len() < 2 {
-        return Err(Diag::new("defunion/defenum requires a name").with_span(span));
+        return Err(Diag::new("defunion requires a name").with_span(span));
     }
-    let (head, _) = atom_sym(&items[0]).ok_or_else(|| {
-        Diag::new("expected symbol 'defunion' or 'defenum'").with_span(se_span(&items[0]))
-    })?;
+    let (head, _) = atom_sym(&items[0])
+        .ok_or_else(|| Diag::new("expected symbol 'defunion' or 'defenum'").with_span(se_span(&items[0])))?;
     if head != "defunion" && head != "defenum" {
         return Err(Diag::new("expected 'defunion' or 'defenum'").with_span(se_span(&items[0])));
     }
@@ -736,7 +640,8 @@ pub fn parse_union(se: &Sexp) -> DslResult<UnionDef> {
             Sexp::List(v, sp) => (v, sp.clone()),
             _ => {
                 return Err(
-                    Diag::new("variant must be (Name (field Type) ...)").with_span(se_span(v))
+                    Diag::new("variant must be (Name (field Type) ...)")
+                        .with_span(se_span(v)),
                 )
             }
         };
@@ -802,7 +707,11 @@ pub fn parse_union(se: &Sexp) -> DslResult<UnionDef> {
 pub fn parse_params(se: &Sexp) -> DslResult<Vec<Param>> {
     let (items, _span) = match se {
         Sexp::Brack(items, span) => (items, span.clone()),
-        _ => return Err(Diag::new("expected parameter list in [..]").with_span(se_span(se))),
+        _ => {
+            return Err(
+                Diag::new("expected parameter list in [..]").with_span(se_span(se))
+            )
+        }
     };
     let mut out = Vec::new();
     for it in items {
@@ -830,23 +739,6 @@ pub fn parse_params(se: &Sexp) -> DslResult<Vec<Param>> {
     Ok(out)
 }
 
-fn parse_symbol_ascription(sym: &str, sp: &Span) -> DslResult<Option<Expr>> {
-    let (name, ty) = match sym.split_once(':') {
-        Some(parts) => parts,
-        None => return Ok(None),
-    };
-    if name.is_empty() || ty.is_empty() {
-        return Err(Diag::new("type ascription must be name:Type").with_span(sp.clone()));
-    }
-    let name = ensure_lisp_ident(name, sp, "variable name")?;
-    let ann = parse_type_from_sym_checked(ty, sp)?;
-    Ok(Some(Expr::Ascribe {
-        expr: Box::new(Expr::Var(rust_value_name(&name), sp.clone())),
-        ann,
-        span: sp.clone(),
-    }))
-}
-
 pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
     match se {
         Sexp::Atom(TokKind::Int(v), sp) => Ok(Expr::Int(*v, sp.clone())),
@@ -859,29 +751,9 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
             Ok(Expr::Keyword(s.clone(), sp.clone()))
         }
         Sexp::Atom(TokKind::Sym(s), sp) => {
-            if s == "true" {
-                return Ok(Expr::Bool(true, sp.clone()));
-            }
-            if s == "false" {
-                return Ok(Expr::Bool(false, sp.clone()));
-            }
-            if s == "nil" {
-                return Ok(Expr::Unit(sp.clone()));
-            }
-            if let Some(rest) = s.strip_prefix(':') {
-                if rest.is_empty() {
-                    return Err(Diag::new("keyword cannot be empty").with_span(sp.clone()));
-                }
-                let name = ensure_keyword_ident(rest, sp)?;
-                return Ok(Expr::Keyword(format!(":{}", name), sp.clone()));
-            }
-            if let Some(expr) = parse_symbol_ascription(s, sp)? {
-                return Ok(expr);
-            }
             if s.contains('/') {
-                return Err(
-                    Diag::new("qualified name is only allowed in call heads").with_span(sp.clone())
-                );
+                return Err(Diag::new("qualified name is only allowed in call heads")
+                    .with_span(sp.clone()));
             }
             if let Some((a, b)) = s.split_once('.') {
                 if !a.is_empty() && !b.is_empty() {
@@ -897,16 +769,13 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
             let name = ensure_lisp_ident(s, sp, "variable name")?;
             Ok(Expr::Var(rust_value_name(&name), sp.clone()))
         }
-        Sexp::Atom(k, sp) => Err(Diag::new(format!(
-            "unexpected token {:?} where expression expected",
-            k
-        ))
-        .with_span(sp.clone())),
+        Sexp::Atom(k, sp) => Err(
+            Diag::new(format!("unexpected token {:?} where expression expected", k))
+                .with_span(sp.clone()),
+        ),
         Sexp::Brace(items, span) => {
             if items.len() % 2 != 0 {
-                return Err(
-                    Diag::new("map literal must have even number of forms").with_span(span.clone())
-                );
+                return Err(Diag::new("map literal must have even number of forms").with_span(span.clone()));
             }
             let mut entries = Vec::new();
             let mut idx = 0usize;
@@ -929,13 +798,6 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                     Diag::new("empty list is not a valid expression").with_span(span.clone())
                 );
             }
-            if items.len() == 1 {
-                if let Some((sym, sym_span)) = atom_sym(&items[0]) {
-                    if let Some(expr) = parse_symbol_ascription(&sym, &sym_span)? {
-                        return Ok(expr);
-                    }
-                }
-            }
             let (op, op_span) = match atom_sym(&items[0]) {
                 Some(v) => v,
                 None => {
@@ -953,52 +815,6 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                     );
                 }
             };
-            if op == "." {
-                if items.len() < 3 {
-                    return Err(
-                        Diag::new("interop form is (. obj member [args...])").with_span(op_span)
-                    );
-                }
-                let base = parse_expr(&items[1])?;
-                let (member, msp) = atom_sym(&items[2]).ok_or_else(|| {
-                    Diag::new("member name must be a symbol").with_span(se_span(&items[2]))
-                })?;
-                let member = ensure_member_ident(&member, &msp)?;
-                let mut args = Vec::new();
-                for item in items.iter().skip(3) {
-                    args.push(parse_expr(item)?);
-                }
-                return Ok(Expr::MethodCall {
-                    base: Box::new(base),
-                    method: rust_value_name(&member),
-                    args,
-                    span: span.clone(),
-                });
-            }
-            if let Some(method) = op.strip_prefix('.') {
-                if method.is_empty() {
-                    return Err(
-                        Diag::new("interop form is (.method obj [args...])").with_span(op_span)
-                    );
-                }
-                if items.len() < 2 {
-                    return Err(
-                        Diag::new("interop form is (.method obj [args...])").with_span(op_span)
-                    );
-                }
-                let method = ensure_member_ident(method, &op_span)?;
-                let base = parse_expr(&items[1])?;
-                let mut args = Vec::new();
-                for item in items.iter().skip(2) {
-                    args.push(parse_expr(item)?);
-                }
-                return Ok(Expr::MethodCall {
-                    base: Box::new(base),
-                    method: rust_value_name(&method),
-                    args,
-                    span: span.clone(),
-                });
-            }
             if op == "if" {
                 if items.len() < 3 || items.len() > 4 {
                     return Err(Diag::new("if form is (if cond then [else])").with_span(op_span));
@@ -1014,36 +830,6 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                     cond: Box::new(cond),
                     then_br: Box::new(then_br),
                     else_br,
-                    span: span.clone(),
-                });
-            }
-            if op == "type" {
-                if items.len() != 3 {
-                    return Err(Diag::new("type form is (type expr Type)").with_span(op_span));
-                }
-                let expr = parse_expr(&items[1])?;
-                let (ty_sym, ty_sp) = atom_sym(&items[2]).ok_or_else(|| {
-                    Diag::new("type name must be a symbol").with_span(se_span(&items[2]))
-                })?;
-                let ann = parse_type_from_sym_checked(&ty_sym, &ty_sp)?;
-                return Ok(Expr::Ascribe {
-                    expr: Box::new(expr),
-                    ann,
-                    span: span.clone(),
-                });
-            }
-            if op == "cast" {
-                if items.len() != 3 {
-                    return Err(Diag::new("cast form is (cast expr Type)").with_span(op_span));
-                }
-                let expr = parse_expr(&items[1])?;
-                let (ty_sym, ty_sp) = atom_sym(&items[2]).ok_or_else(|| {
-                    Diag::new("cast type must be a symbol").with_span(se_span(&items[2]))
-                })?;
-                let ann = parse_type_from_sym_checked(&ty_sym, &ty_sp)?;
-                return Ok(Expr::Cast {
-                    expr: Box::new(expr),
-                    ann,
                     span: span.clone(),
                 });
             }
@@ -1072,7 +858,8 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
             if op == "for" {
                 if items.len() != 4 {
                     return Err(
-                        Diag::new("for form is (for name iterable expr)").with_span(op_span)
+                        Diag::new("for form is (for name iterable expr)")
+                            .with_span(op_span),
                     );
                 }
                 let (name, sp) = atom_sym(&items[1]).ok_or_else(|| {
@@ -1091,21 +878,6 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                     var: rust_value_name(&name),
                     iter,
                     body: Box::new(body),
-                    span: span.clone(),
-                });
-            }
-            if op == "let!" {
-                if items.len() != 3 {
-                    return Err(Diag::new("let! form is (let! name expr)").with_span(op_span));
-                }
-                let (name, sp) = atom_sym(&items[1]).ok_or_else(|| {
-                    Diag::new("let! binding must be a symbol").with_span(se_span(&items[1]))
-                })?;
-                let name = ensure_lisp_ident(&name, &sp, "let! binding")?;
-                let expr = parse_expr(&items[2])?;
-                return Ok(Expr::Set {
-                    name: rust_value_name(&name),
-                    expr: Box::new(expr),
                     span: span.clone(),
                 });
             }
@@ -1189,9 +961,6 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
             if op == "match" || op == "case" {
                 return parse_match(span, &items[1..]);
             }
-            if op == "case" {
-                return parse_match(span, &items[1..]);
-            }
             if op == "let" {
                 if items.len() != 3 {
                     return Err(Diag::new("let form is (let [bindings] body)").with_span(op_span));
@@ -1259,31 +1028,6 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                     ann: Some(head_ty),
                 });
             }
-            if let Ty::Set(_) = head_ty {
-                let mut elems = Vec::new();
-                for a in items.iter().skip(1) {
-                    elems.push(parse_expr(a)?);
-                }
-                return Ok(Expr::SetLit {
-                    elems,
-                    span: Span {
-                        start: op_span.start,
-                        end: span.end.clone(),
-                    },
-                    ann: Some(head_ty),
-                });
-            }
-            if op == "set" || op == "hashset" {
-                let mut elems = Vec::new();
-                for a in items.iter().skip(1) {
-                    elems.push(parse_expr(a)?);
-                }
-                return Ok(Expr::SetLit {
-                    elems,
-                    span: span.clone(),
-                    ann: None,
-                });
-            }
             if !is_builtin_op(&op) {
                 if op.contains('/') {
                     ensure_qualified_name(&op, &op_span, "call name")?;
@@ -1340,7 +1084,9 @@ fn parse_range_expr(se: &Sexp) -> DslResult<RangeExpr> {
         "range" => false,
         "range-incl" => true,
         _ => {
-            return Err(Diag::new("for expects (range ...) or (range-incl ...)").with_span(head_sp))
+            return Err(
+                Diag::new("for expects (range ...) or (range-incl ...)").with_span(head_sp)
+            )
         }
     };
     if items.len() < 3 || items.len() > 4 {
@@ -1368,9 +1114,7 @@ fn parse_let_bindings(se: &Sexp) -> DslResult<Vec<LetBinding>> {
         _ => return Err(Diag::new("let bindings must be in [..]").with_span(se_span(se))),
     };
     let mut bindings = Vec::new();
-    let all_pairs = items
-        .iter()
-        .all(|it| matches!(it, Sexp::List(v, _) if v.len() == 2));
+    let all_pairs = items.iter().all(|it| matches!(it, Sexp::List(v, _) if v.len() == 2));
     if all_pairs {
         for it in items {
             let (pair, sp) = match it {
@@ -1442,9 +1186,8 @@ fn parse_match(span: &Span, items: &[Sexp]) -> DslResult<Expr> {
         if aitems.len() < 2 {
             return Err(Diag::new("match arm must have a pattern and body").with_span(aspan));
         }
-        let (head, head_sp) = atom_sym(&aitems[0]).ok_or_else(|| {
-            Diag::new("match arm head must be a symbol").with_span(se_span(&aitems[0]))
-        })?;
+        let (head, head_sp) = atom_sym(&aitems[0])
+            .ok_or_else(|| Diag::new("match arm head must be a symbol").with_span(se_span(&aitems[0])))?;
         if head == "_" {
             if aitems.len() != 2 {
                 return Err(Diag::new("wildcard match arm is (_ expr)").with_span(aspan));
@@ -1472,14 +1215,7 @@ fn parse_match(span: &Span, items: &[Sexp]) -> DslResult<Expr> {
                                 let n = ensure_lisp_ident(&name, &nsp, "binding name")?;
                                 rust_value_name(&n)
                             };
-                            bindings.push((
-                                field,
-                                name,
-                                Span {
-                                    start: fsp.start,
-                                    end: nsp.end,
-                                },
-                            ));
+                            bindings.push((field, name, Span { start: fsp.start, end: nsp.end }));
                             idx += 1;
                             continue;
                         }
@@ -1519,16 +1255,16 @@ fn parse_match(span: &Span, items: &[Sexp]) -> DslResult<Expr> {
 pub fn parse_fn(se: &Sexp) -> DslResult<FnDef> {
     let (items, span) = match se {
         Sexp::List(items, span) => (items, span.clone()),
-        _ => return Err(Diag::new("expected (defn ... )").with_span(se_span(se))),
+        _ => return Err(Diag::new("expected (defn ...)").with_span(se_span(se))),
     };
-    if items.len() < 4 {
-        return Err(Diag::new("defn requires name, params, and body").with_span(span.clone()));
+    if items.len() != 4 {
+        return Err(Diag::new("defn form is (defn name [params] body)").with_span(span));
     }
     let (head, _) = atom_sym(&items[0])
         .ok_or_else(|| Diag::new("expected symbol 'defn'").with_span(se_span(&items[0])))?;
-    let specialize = head.ends_with(".specialize");
-    let exported = head.starts_with("defpub");
-
+    if head != "defn" {
+        return Err(Diag::new("expected 'defn'").with_span(se_span(&items[0])));
+    }
     let (name, name_sp) = atom_sym(&items[1])
         .ok_or_else(|| Diag::new("expected function name").with_span(se_span(&items[1])))?;
     let name = ensure_lisp_ident(&name, &name_sp, "function name")?;
@@ -1545,8 +1281,6 @@ pub fn parse_fn(se: &Sexp) -> DslResult<FnDef> {
         },
         extern_: false,
         extern_ret: None,
-        specialize,
-        exported,
     })
 }
 
@@ -1630,9 +1364,7 @@ fn parse_extern_toplevel(se: &Sexp) -> DslResult<Top> {
         override_name = Some(s);
         idx = 2;
     }
-    let form = items
-        .get(idx)
-        .ok_or_else(|| Diag::new("extern requires a form").with_span(span.clone()))?;
+    let form = items.get(idx).ok_or_else(|| Diag::new("extern requires a form").with_span(span.clone()))?;
     let (fitems, _fspan) = match form {
         Sexp::List(v, sp) => (v, sp.clone()),
         _ => return Err(Diag::new("extern requires a def form").with_span(se_span(form))),
@@ -1640,9 +1372,8 @@ fn parse_extern_toplevel(se: &Sexp) -> DslResult<Top> {
     if fitems.is_empty() {
         return Err(Diag::new("extern requires a def form").with_span(se_span(form)));
     }
-    let (head, _) = atom_sym(&fitems[0]).ok_or_else(|| {
-        Diag::new("extern form head must be a symbol").with_span(se_span(&fitems[0]))
-    })?;
+    let (head, _) = atom_sym(&fitems[0])
+        .ok_or_else(|| Diag::new("extern form head must be a symbol").with_span(se_span(&fitems[0])))?;
     match head.as_str() {
         "defstruct" | "defrecord" => {
             let mut sd = parse_struct(form)?;
@@ -1661,8 +1392,7 @@ fn parse_extern_toplevel(se: &Sexp) -> DslResult<Top> {
             Ok(Top::Union(ud))
         }
         "defn" => parse_extern_fn(form, override_name),
-        _ => Err(Diag::new("extern can wrap defstruct, defunion, or defn")
-            .with_span(se_span(&fitems[0]))),
+        _ => Err(Diag::new("extern can wrap defstruct, defunion, or defn").with_span(se_span(&fitems[0]))),
     }
 }
 
@@ -1683,25 +1413,21 @@ fn parse_extern_fn(se: &Sexp, override_name: Option<String>) -> DslResult<Top> {
         .ok_or_else(|| Diag::new("expected function name").with_span(se_span(&items[1])))?;
     let name = ensure_lisp_ident(&name, &name_sp, "function name")?;
     let params = parse_params(&items[2])?;
-    let (ret_sym, ret_sp) = atom_sym(&items[3]).ok_or_else(|| {
-        Diag::new("extern defn return type must be a symbol").with_span(se_span(&items[3]))
-    })?;
+    let (ret_sym, ret_sp) = atom_sym(&items[3])
+        .ok_or_else(|| Diag::new("extern defn return type must be a symbol").with_span(se_span(&items[3])))?;
     let ret_ty = parse_type_from_sym_checked(&ret_sym, &ret_sp)?;
-    let _dummy_body = Expr::Var("__extern".to_string(), ret_sp.clone());
-    let rust_name = override_name.unwrap_or_else(|| rust_value_name(&name));
+    let dummy_body = Expr::Var("__extern".to_string(), ret_sp.clone());
     Ok(Top::Func(FnDef {
-        name,
-        rust_name,
+        name: name.clone(),
+        rust_name: override_name.unwrap_or_else(|| rust_value_name(&name)),
         params,
-        body: Expr::Unit(span.clone()),
+        body: dummy_body,
         span: Span {
             start: name_sp.start,
             end: span.end,
         },
         extern_: true,
         extern_ret: Some(ret_ty),
-        specialize: false,
-        exported: true,
     }))
 }
 
@@ -1719,18 +1445,19 @@ pub fn parse_toplevel(sexps: &[Sexp]) -> DslResult<Vec<Top>> {
     for se in sexps {
         let (items, span) = match se {
             Sexp::List(items, span) => (items, span.clone()),
-            _ => return Err(Diag::new("top-level forms must be lists").with_span(se_span(se))),
+            _ => {
+                return Err(
+                    Diag::new("top-level forms must be lists").with_span(se_span(se))
+                )
+            }
         };
         if items.is_empty() {
             return Err(Diag::new("empty top-level list").with_span(se_span(se)));
         }
-        let (head, _) = atom_sym(&items[0]).ok_or_else(|| {
-            Diag::new("top-level head must be a symbol").with_span(se_span(&items[0]))
-        })?;
+        let (head, _) = atom_sym(&items[0])
+            .ok_or_else(|| Diag::new("top-level head must be a symbol").with_span(se_span(&items[0])))?;
         match head.as_str() {
-            "use" => out.push(Top::Use(parse_use_decl(&items[1..], &span, false)?)),
-            "require" => out.push(Top::Use(parse_use_decl(&items[1..], &span, false)?)),
-
+            "use" | "require" => out.push(Top::Use(parse_use_decl(&items[1..], &span, false)?)),
             "open" => out.push(Top::Use(parse_use_decl(&items[1..], &span, true)?)),
             "extern" => out.push(parse_extern_toplevel(se)?),
             "defstruct" | "defrecord" => out.push(Top::Struct(parse_struct(se)?)),
@@ -1749,9 +1476,7 @@ pub fn parse_toplevel(sexps: &[Sexp]) -> DslResult<Vec<Top>> {
 
 pub fn parse_use_decl(items: &[Sexp], span: &Span, open: bool) -> DslResult<UseDecl> {
     if items.is_empty() {
-        return Err(
-            Diag::new("use form is (use path [:as name] [:only (a b)])").with_span(span.clone())
-        );
+        return Err(Diag::new("use form is (use path [:as name] [:only (a b)])").with_span(span.clone()));
     }
     let (path, path_sp) = match &items[0] {
         Sexp::Atom(TokKind::Sym(s), sp) => (s.clone(), sp.clone()),
@@ -1770,10 +1495,7 @@ pub fn parse_use_decl(items: &[Sexp], span: &Span, open: bool) -> DslResult<UseD
             ":as" => {
                 let (name, sp) = match items.get(idx) {
                     Some(Sexp::Atom(TokKind::Sym(s), sp)) => (s.clone(), sp.clone()),
-                    _ => {
-                        return Err(Diag::new("use :as must be followed by a symbol")
-                            .with_span(span.clone()))
-                    }
+                    _ => return Err(Diag::new("use :as must be followed by a symbol").with_span(span.clone())),
                 };
                 let name = ensure_lisp_ident(&name, &sp, "use alias")?;
                 alias = Some(name);
@@ -1782,10 +1504,7 @@ pub fn parse_use_decl(items: &[Sexp], span: &Span, open: bool) -> DslResult<UseD
             ":only" => {
                 let list = match items.get(idx) {
                     Some(Sexp::List(v, _)) => v,
-                    _ => {
-                        return Err(Diag::new("use :only must be followed by a list")
-                            .with_span(span.clone()))
-                    }
+                    _ => return Err(Diag::new("use :only must be followed by a list").with_span(span.clone())),
                 };
                 let mut names = Vec::new();
                 for it in list {
@@ -1793,9 +1512,7 @@ pub fn parse_use_decl(items: &[Sexp], span: &Span, open: bool) -> DslResult<UseD
                         let s = ensure_lisp_ident(&s, &sp, "use :only name")?;
                         names.push(s);
                     } else {
-                        return Err(
-                            Diag::new("use :only entries must be symbols").with_span(span.clone())
-                        );
+                        return Err(Diag::new("use :only entries must be symbols").with_span(span.clone()));
                     }
                 }
                 only = Some(names);
@@ -1810,11 +1527,5 @@ pub fn parse_use_decl(items: &[Sexp], span: &Span, open: bool) -> DslResult<UseD
     if open && (alias.is_some() || only.is_some()) {
         return Err(Diag::new("open does not accept :as or :only").with_span(span.clone()));
     }
-    Ok(UseDecl {
-        path,
-        alias,
-        only,
-        open,
-        span: path_sp,
-    })
+    Ok(UseDecl { path, alias, only, open, span: path_sp })
 }
