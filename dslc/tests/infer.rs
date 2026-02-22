@@ -28,8 +28,8 @@ fn lowers_generic_identity() {
     let src = "(defn id [x] x) (defn main [] (id 1))";
     let out = compile(src).expect("compile ok");
     assert!(!out.contains("fn id<T"), "{}", out);
-    assert!(out.contains("fn id__spec_"), "{}", out);
-    assert!(out.contains("id__spec_"), "{}", out);
+    assert!(out.contains("fn id_spec_"), "{}", out);
+    assert!(out.contains("id_spec_"), "{}", out);
 }
 
 #[test]
