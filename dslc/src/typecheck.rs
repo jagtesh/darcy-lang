@@ -2341,6 +2341,7 @@ pub(crate) fn expand_inline_tops(tops: &[Top]) -> DslResult<Vec<Top>> {
     if inline_defs.is_empty() {
         return Ok(filtered);
     }
+    ensure_no_inline_cycles(&inline_defs)?;
     let mut out = Vec::new();
     for t in filtered {
         match t {
@@ -2356,6 +2357,186 @@ pub(crate) fn expand_inline_tops(tops: &[Top]) -> DslResult<Vec<Top>> {
         }
     }
     Ok(out)
+}
+
+fn ensure_no_inline_cycles(inline_defs: &BTreeMap<String, crate::ast::InlineDef>) -> DslResult<()> {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Mark {
+        Visiting,
+        Done,
+    }
+
+    let mut marks: BTreeMap<String, Mark> = BTreeMap::new();
+    let mut stack: Vec<String> = Vec::new();
+
+    fn visit(
+        name: &str,
+        inline_defs: &BTreeMap<String, crate::ast::InlineDef>,
+        marks: &mut BTreeMap<String, Mark>,
+        stack: &mut Vec<String>,
+    ) -> DslResult<()> {
+        if matches!(marks.get(name), Some(Mark::Done)) {
+            return Ok(());
+        }
+        if matches!(marks.get(name), Some(Mark::Visiting)) {
+            let mut cycle = Vec::new();
+            let mut started = false;
+            for n in stack.iter() {
+                if n == name {
+                    started = true;
+                }
+                if started {
+                    cycle.push(n.clone());
+                }
+            }
+            cycle.push(name.to_string());
+            let inl = inline_defs.get(name).expect("inline exists");
+            return Err(Diag::new(format!(
+                "recursive defin is not allowed: {}",
+                cycle.join(" -> ")
+            ))
+            .with_span(inl.span.clone()));
+        }
+
+        marks.insert(name.to_string(), Mark::Visiting);
+        stack.push(name.to_string());
+
+        let mut deps = BTreeSet::new();
+        collect_inline_deps(&inline_defs[name].body, inline_defs, &mut deps);
+        for dep in deps {
+            visit(&dep, inline_defs, marks, stack)?;
+        }
+
+        stack.pop();
+        marks.insert(name.to_string(), Mark::Done);
+        Ok(())
+    }
+
+    for name in inline_defs.keys() {
+        visit(name, inline_defs, &mut marks, &mut stack)?;
+    }
+    Ok(())
+}
+
+fn collect_inline_deps(
+    expr: &Expr,
+    inline_defs: &BTreeMap<String, crate::ast::InlineDef>,
+    out: &mut BTreeSet<String>,
+) {
+    match expr {
+        Expr::Call { op, args, .. } => {
+            if inline_defs.contains_key(op) {
+                out.insert(op.clone());
+            }
+            for a in args {
+                collect_inline_deps(a, inline_defs, out);
+            }
+        }
+        Expr::If {
+            cond,
+            then_br,
+            else_br,
+            ..
+        } => {
+            collect_inline_deps(cond, inline_defs, out);
+            collect_inline_deps(then_br, inline_defs, out);
+            if let Some(e) = else_br {
+                collect_inline_deps(e, inline_defs, out);
+            }
+        }
+        Expr::Let { bindings, body, .. } => {
+            for b in bindings {
+                collect_inline_deps(&b.expr, inline_defs, out);
+            }
+            collect_inline_deps(body, inline_defs, out);
+        }
+        Expr::Lambda { body, .. } | Expr::Loop { body, .. } => {
+            collect_inline_deps(body, inline_defs, out)
+        }
+        Expr::While { cond, body, .. } => {
+            collect_inline_deps(cond, inline_defs, out);
+            collect_inline_deps(body, inline_defs, out);
+        }
+        Expr::For { iter, body, .. } => {
+            collect_inline_deps(body, inline_defs, out);
+            collect_inline_deps_iterable(iter, inline_defs, out);
+        }
+        Expr::Do { exprs, .. } => {
+            for e in exprs {
+                collect_inline_deps(e, inline_defs, out);
+            }
+        }
+        Expr::Set { expr, .. } => collect_inline_deps(expr, inline_defs, out),
+        Expr::Break { value, .. } => {
+            if let Some(v) = value {
+                collect_inline_deps(v, inline_defs, out);
+            }
+        }
+        Expr::Pair { key, val, .. } => {
+            collect_inline_deps(key, inline_defs, out);
+            collect_inline_deps(val, inline_defs, out);
+        }
+        Expr::Field { base, .. } => collect_inline_deps(base, inline_defs, out),
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            collect_inline_deps(scrutinee, inline_defs, out);
+            for arm in arms {
+                collect_inline_deps(&arm.body, inline_defs, out);
+            }
+        }
+        Expr::CallDyn { func, args, .. } => {
+            collect_inline_deps(func, inline_defs, out);
+            for a in args {
+                collect_inline_deps(a, inline_defs, out);
+            }
+        }
+        Expr::MethodCall { base, args, .. } => {
+            collect_inline_deps(base, inline_defs, out);
+            for a in args {
+                collect_inline_deps(a, inline_defs, out);
+            }
+        }
+        Expr::VecLit { elems, .. } | Expr::SetLit { elems, .. } => {
+            for e in elems {
+                collect_inline_deps(e, inline_defs, out);
+            }
+        }
+        Expr::MapLit { entries, .. } => {
+            for (k, v) in entries {
+                collect_inline_deps(k, inline_defs, out);
+                collect_inline_deps(v, inline_defs, out);
+            }
+        }
+        Expr::Ascribe { expr, .. } | Expr::Cast { expr, .. } => {
+            collect_inline_deps(expr, inline_defs, out)
+        }
+        Expr::Int(..)
+        | Expr::Float(..)
+        | Expr::Str(..)
+        | Expr::Bool(..)
+        | Expr::Unit(..)
+        | Expr::Keyword(..)
+        | Expr::Var(..)
+        | Expr::Continue { .. } => {}
+    }
+}
+
+fn collect_inline_deps_iterable(
+    iter: &crate::ast::Iterable,
+    inline_defs: &BTreeMap<String, crate::ast::InlineDef>,
+    out: &mut BTreeSet<String>,
+) {
+    match iter {
+        crate::ast::Iterable::Expr(e) => collect_inline_deps(e, inline_defs, out),
+        crate::ast::Iterable::Range(r) => {
+            collect_inline_deps(&r.start, inline_defs, out);
+            collect_inline_deps(&r.end, inline_defs, out);
+            if let Some(s) = &r.step {
+                collect_inline_deps(s, inline_defs, out);
+            }
+        }
+    }
 }
 
 fn expand_inline_calls(

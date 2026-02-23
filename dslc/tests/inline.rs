@@ -13,3 +13,10 @@ fn inline_can_capture_caller_vars() {
     let out = compile(src).expect("compile ok");
     assert!(out.contains("x + y"), "{}", out);
 }
+
+#[test]
+fn recursive_inline_is_rejected() {
+    let src = "(defin looped [x] (looped x)) (defn main [] (looped 1))";
+    let err = compile(src).expect_err("recursive inline should fail");
+    assert!(err.message.contains("recursive defin is not allowed"));
+}

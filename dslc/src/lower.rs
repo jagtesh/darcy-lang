@@ -210,7 +210,9 @@ pub fn lower_program(pipeline: &PipelineOutput) -> DslResult<String> {
                 ));
             }
             out.push_str("    ");
-            out.push_str(&lower_expr(
+            out.push_str(&lower_fn_body(
+                fd,
+                typed,
                 &typed.body.expr,
                 &typed.body.casts,
                 &typed.body.types,
@@ -248,7 +250,9 @@ pub fn lower_program(pipeline: &PipelineOutput) -> DslResult<String> {
         emit_params(&mut out, &f.def, f, &type_names)?;
         out.push_str(&format!(") -> {} {{\n", ty_rust(&f.body.ty, &type_names)));
         out.push_str("    ");
-        out.push_str(&lower_expr(
+        out.push_str(&lower_fn_body(
+            &f.def,
+            f,
             &f.body.expr,
             &f.body.casts,
             &f.body.types,
@@ -270,6 +274,382 @@ pub fn lower_program(pipeline: &PipelineOutput) -> DslResult<String> {
 fn emit_allow_lints(out: &mut String) {
     for lint in ALLOW_LINTS {
         out.push_str(&format!("#![allow({})]\n", lint));
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lower_fn_body(
+    fd: &crate::ast::FnDef,
+    typed: &TypedFn,
+    expr: &Expr,
+    casts: &[crate::typed::CastHint],
+    types: &BTreeMap<SpanKey, Ty>,
+    structs: &BTreeMap<String, StructDef>,
+    variants: &BTreeMap<String, (String, VariantDef)>,
+    fn_names: &FnNameMap,
+    def_names: &BTreeMap<String, String>,
+    type_names: &BTreeMap<String, String>,
+    fn_env: &crate::typecheck::FnEnv,
+    auto_clones: &BTreeSet<SpanKey>,
+    mutated: &BTreeSet<String>,
+) -> String {
+    lower_self_tail_recursive_body(
+        fd,
+        typed,
+        expr,
+        casts,
+        types,
+        structs,
+        variants,
+        fn_names,
+        def_names,
+        type_names,
+        fn_env,
+        auto_clones,
+        mutated,
+    )
+    .unwrap_or_else(|| {
+        lower_expr(
+            expr,
+            casts,
+            types,
+            structs,
+            variants,
+            fn_names,
+            def_names,
+            type_names,
+            fn_env,
+            auto_clones,
+            mutated,
+        )
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lower_self_tail_recursive_body(
+    fd: &crate::ast::FnDef,
+    typed: &TypedFn,
+    expr: &Expr,
+    casts: &[crate::typed::CastHint],
+    types: &BTreeMap<SpanKey, Ty>,
+    structs: &BTreeMap<String, StructDef>,
+    variants: &BTreeMap<String, (String, VariantDef)>,
+    fn_names: &FnNameMap,
+    def_names: &BTreeMap<String, String>,
+    type_names: &BTreeMap<String, String>,
+    fn_env: &crate::typecheck::FnEnv,
+    auto_clones: &BTreeSet<SpanKey>,
+    mutated: &BTreeSet<String>,
+) -> Option<String> {
+    if !has_self_tail_call(expr, &fd.name, fd.params.len(), true) {
+        return None;
+    }
+    let param_modes: Vec<ParamMode> = fd
+        .params
+        .iter()
+        .map(|p| {
+            typed
+                .param_modes
+                .get(&p.rust_name)
+                .copied()
+                .unwrap_or(ParamMode::ByVal)
+        })
+        .collect();
+    let mut setup = Vec::new();
+    for p in &fd.params {
+        setup.push(format!("let mut {} = {};", p.rust_name, p.rust_name));
+    }
+    let tail_stmt = lower_tail_stmt(
+        expr,
+        &fd.name,
+        &fd.params,
+        &param_modes,
+        casts,
+        types,
+        structs,
+        variants,
+        fn_names,
+        def_names,
+        type_names,
+        fn_env,
+        auto_clones,
+        mutated,
+    );
+    Some(format!(
+        "{{ {} loop {{ {} }} }}",
+        setup.join(" "),
+        tail_stmt
+    ))
+}
+
+fn has_self_tail_call(expr: &Expr, fn_name: &str, arity: usize, tail: bool) -> bool {
+    match expr {
+        Expr::Call { op, args, .. } => tail && op == fn_name && args.len() == arity,
+        Expr::If {
+            cond,
+            then_br,
+            else_br,
+            ..
+        } => {
+            has_self_tail_call(cond, fn_name, arity, false)
+                || has_self_tail_call(then_br, fn_name, arity, tail)
+                || else_br
+                    .as_ref()
+                    .map(|e| has_self_tail_call(e, fn_name, arity, tail))
+                    .unwrap_or(false)
+        }
+        Expr::Do { exprs, .. } => {
+            for (idx, e) in exprs.iter().enumerate() {
+                let in_tail = tail && idx + 1 == exprs.len();
+                if has_self_tail_call(e, fn_name, arity, in_tail) {
+                    return true;
+                }
+            }
+            false
+        }
+        Expr::Let { bindings, body, .. } => {
+            for b in bindings {
+                if has_self_tail_call(&b.expr, fn_name, arity, false) {
+                    return true;
+                }
+            }
+            has_self_tail_call(body, fn_name, arity, tail)
+        }
+        Expr::Ascribe { expr, .. } | Expr::Cast { expr, .. } => {
+            has_self_tail_call(expr, fn_name, arity, tail)
+        }
+        _ => false,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lower_tail_stmt(
+    expr: &Expr,
+    fn_name: &str,
+    params: &[crate::ast::Param],
+    param_modes: &[ParamMode],
+    casts: &[crate::typed::CastHint],
+    types: &BTreeMap<SpanKey, Ty>,
+    structs: &BTreeMap<String, StructDef>,
+    variants: &BTreeMap<String, (String, VariantDef)>,
+    fn_names: &FnNameMap,
+    def_names: &BTreeMap<String, String>,
+    type_names: &BTreeMap<String, String>,
+    fn_env: &crate::typecheck::FnEnv,
+    auto_clones: &BTreeSet<SpanKey>,
+    mutated: &BTreeSet<String>,
+) -> String {
+    match expr {
+        Expr::Call { op, args, .. } if op == fn_name && args.len() == params.len() => {
+            let mut parts = Vec::new();
+            for (idx, (arg, mode)) in args.iter().zip(param_modes.iter()).enumerate() {
+                let rendered = lower_expr(
+                    arg,
+                    casts,
+                    types,
+                    structs,
+                    variants,
+                    fn_names,
+                    def_names,
+                    type_names,
+                    fn_env,
+                    auto_clones,
+                    mutated,
+                );
+                let arg_value = match mode {
+                    ParamMode::ByRef => format!("&{}", rendered),
+                    ParamMode::ByRefNoAmp | ParamMode::ByVal => rendered,
+                };
+                parts.push(format!("let __tco_arg_{} = {};", idx, arg_value));
+            }
+            for (idx, p) in params.iter().enumerate() {
+                parts.push(format!("{} = __tco_arg_{};", p.rust_name, idx));
+            }
+            parts.push("continue;".to_string());
+            format!("{{ {} }}", parts.join(" "))
+        }
+        Expr::If {
+            cond,
+            then_br,
+            else_br,
+            ..
+        } => {
+            let cond = lower_expr(
+                cond,
+                casts,
+                types,
+                structs,
+                variants,
+                fn_names,
+                def_names,
+                type_names,
+                fn_env,
+                auto_clones,
+                mutated,
+            );
+            let then_s = lower_tail_stmt(
+                then_br,
+                fn_name,
+                params,
+                param_modes,
+                casts,
+                types,
+                structs,
+                variants,
+                fn_names,
+                def_names,
+                type_names,
+                fn_env,
+                auto_clones,
+                mutated,
+            );
+            let else_s = else_br.as_ref().map_or_else(
+                || "break ();".to_string(),
+                |e| {
+                    lower_tail_stmt(
+                        e,
+                        fn_name,
+                        params,
+                        param_modes,
+                        casts,
+                        types,
+                        structs,
+                        variants,
+                        fn_names,
+                        def_names,
+                        type_names,
+                        fn_env,
+                        auto_clones,
+                        mutated,
+                    )
+                },
+            );
+            format!("if {} {{ {} }} else {{ {} }}", cond, then_s, else_s)
+        }
+        Expr::Do { exprs, .. } => {
+            if exprs.is_empty() {
+                return "break ();".to_string();
+            }
+            let mut parts = Vec::new();
+            for ex in exprs.iter().take(exprs.len() - 1) {
+                parts.push(format!(
+                    "{};",
+                    lower_expr(
+                        ex,
+                        casts,
+                        types,
+                        structs,
+                        variants,
+                        fn_names,
+                        def_names,
+                        type_names,
+                        fn_env,
+                        auto_clones,
+                        mutated,
+                    )
+                ));
+            }
+            parts.push(lower_tail_stmt(
+                &exprs[exprs.len() - 1],
+                fn_name,
+                params,
+                param_modes,
+                casts,
+                types,
+                structs,
+                variants,
+                fn_names,
+                def_names,
+                type_names,
+                fn_env,
+                auto_clones,
+                mutated,
+            ));
+            format!("{{ {} }}", parts.join(" "))
+        }
+        Expr::Let { bindings, body, .. } => {
+            let mut parts = Vec::new();
+            for b in bindings {
+                let expr = lower_expr(
+                    &b.expr,
+                    casts,
+                    types,
+                    structs,
+                    variants,
+                    fn_names,
+                    def_names,
+                    type_names,
+                    fn_env,
+                    auto_clones,
+                    mutated,
+                );
+                let mut_kw = if mutated.contains(&b.rust_name) {
+                    "mut "
+                } else {
+                    ""
+                };
+                if let Some(ann) = &b.ann {
+                    parts.push(format!(
+                        "let {}{}: {} = {};",
+                        mut_kw,
+                        b.rust_name,
+                        ty_rust(ann, type_names),
+                        expr
+                    ));
+                } else {
+                    parts.push(format!("let {}{} = {};", mut_kw, b.rust_name, expr));
+                }
+            }
+            parts.push(lower_tail_stmt(
+                body,
+                fn_name,
+                params,
+                param_modes,
+                casts,
+                types,
+                structs,
+                variants,
+                fn_names,
+                def_names,
+                type_names,
+                fn_env,
+                auto_clones,
+                mutated,
+            ));
+            format!("{{ {} }}", parts.join(" "))
+        }
+        Expr::Ascribe { expr, .. } | Expr::Cast { expr, .. } => lower_tail_stmt(
+            expr,
+            fn_name,
+            params,
+            param_modes,
+            casts,
+            types,
+            structs,
+            variants,
+            fn_names,
+            def_names,
+            type_names,
+            fn_env,
+            auto_clones,
+            mutated,
+        ),
+        _ => format!(
+            "break {};",
+            lower_expr(
+                expr,
+                casts,
+                types,
+                structs,
+                variants,
+                fn_names,
+                def_names,
+                type_names,
+                fn_env,
+                auto_clones,
+                mutated,
+            )
+        ),
     }
 }
 
