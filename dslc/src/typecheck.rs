@@ -15,7 +15,7 @@ pub struct FnSig {
 
 #[derive(Debug, Clone)]
 pub struct FnEnv {
-    pub fns: BTreeMap<String, FnSig>,
+    pub fns: BTreeMap<String, Vec<FnSig>>,
 }
 
 impl FnEnv {
@@ -26,15 +26,26 @@ impl FnEnv {
     }
 
     pub fn insert(&mut self, name: String, sig: FnSig) -> DslResult<()> {
-        if self.fns.contains_key(&name) {
-            return Err(Diag::new(format!("duplicate function '{}'", name)));
+        let entry = self.fns.entry(name.clone()).or_default();
+        if entry.iter().any(|existing| existing.params.len() == sig.params.len()) {
+            return Err(Diag::new(format!(
+                "duplicate function '{}' with arity {}",
+                name,
+                sig.params.len()
+            )));
         }
-        self.fns.insert(name, sig);
+        entry.push(sig);
         Ok(())
     }
 
-    pub fn get(&self, name: &str) -> Option<&FnSig> {
-        self.fns.get(name)
+    pub fn get(&self, name: &str) -> Option<&[FnSig]> {
+        self.fns.get(name).map(|v| v.as_slice())
+    }
+
+    pub fn get_arity(&self, name: &str, arity: usize) -> Option<&FnSig> {
+        self.fns
+            .get(name)
+            .and_then(|sigs| sigs.iter().find(|sig| sig.params.len() == arity))
     }
 }
 
@@ -107,7 +118,7 @@ struct InferFnSig {
 
 #[derive(Debug, Clone)]
 struct InferFnEnv {
-    fns: BTreeMap<String, InferFnSig>,
+    fns: BTreeMap<String, Vec<InferFnSig>>,
 }
 
 impl InferFnEnv {
@@ -118,15 +129,26 @@ impl InferFnEnv {
     }
 
     fn insert(&mut self, name: String, sig: InferFnSig) -> DslResult<()> {
-        if self.fns.contains_key(&name) {
-            return Err(Diag::new(format!("duplicate function '{}'", name)));
+        let entry = self.fns.entry(name.clone()).or_default();
+        if entry.iter().any(|existing| existing.params.len() == sig.params.len()) {
+            return Err(Diag::new(format!(
+                "duplicate function '{}' with arity {}",
+                name,
+                sig.params.len()
+            )));
         }
-        self.fns.insert(name, sig);
+        entry.push(sig);
         Ok(())
     }
 
-    fn get(&self, name: &str) -> Option<&InferFnSig> {
-        self.fns.get(name)
+    fn get(&self, name: &str) -> Option<&[InferFnSig]> {
+        self.fns.get(name).map(|v| v.as_slice())
+    }
+
+    fn get_arity(&self, name: &str, arity: usize) -> Option<&InferFnSig> {
+        self.fns
+            .get(name)
+            .and_then(|sigs| sigs.iter().find(|sig| sig.params.len() == arity))
     }
 }
 
@@ -672,10 +694,14 @@ pub fn typecheck_tops(tops: &[Top]) -> DslResult<TypecheckedProgram> {
                 if env.structs.contains_key(&fd.name)
                     || env.unions.contains_key(&fd.name)
                     || env.variants.contains_key(&fd.name)
-                    || fn_env.get(&fd.name).is_some()
+                    || fn_env.get_arity(&fd.name, fd.params.len()).is_some()
                     || global_defs.contains_key(&fd.name)
                 {
-                    return Err(Diag::new(format!("duplicate function '{}'", fd.name))
+                    return Err(Diag::new(format!(
+                        "duplicate function '{}' with arity {}",
+                        fd.name,
+                        fd.params.len()
+                    ))
                         .with_span(fd.span.clone()));
                 }
                 check_param_bindings(fd, &def_base_names)?;
@@ -737,7 +763,7 @@ pub fn typecheck_tops(tops: &[Top]) -> DslResult<TypecheckedProgram> {
     for t in &filtered {
         match t {
             Top::Func(fd) => {
-                let sig = fn_env.get(&fd.name).ok_or_else(|| {
+                let sig = fn_env.get_arity(&fd.name, fd.params.len()).ok_or_else(|| {
                     Diag::new("internal error: missing function signature")
                         .with_span(fd.span.clone())
                 })?;
@@ -1538,7 +1564,7 @@ fn infer_param_modes(program: &TypecheckedProgram) -> FnEnv {
 
 fn apply_param_modes(fns: &mut [TypedFn], fn_env: &FnEnv) {
     for f in fns {
-        let sig = match fn_env.get(&f.def.name) {
+        let sig = match fn_env.get_arity(&f.def.name, f.def.params.len()) {
             Some(sig) => sig,
             None => continue,
         };
@@ -1652,7 +1678,9 @@ fn analyze_moves_expr(
             );
         }
         Expr::Call { op, args, .. } => {
-            let modes = fn_env.get(op).map(|s| s.param_modes.clone());
+            let modes = fn_env
+                .get_arity(op, args.len())
+                .map(|s| s.param_modes.clone());
             for (idx, arg) in args.iter().enumerate() {
                 let mode = modes
                     .as_ref()
@@ -1942,7 +1970,9 @@ fn count_consumed_uses(
             );
         }
         Expr::Call { op, args, .. } => {
-            let modes = fn_env.get(op).map(|s| s.param_modes.clone());
+            let modes = fn_env
+                .get_arity(op, args.len())
+                .map(|s| s.param_modes.clone());
             for (idx, arg) in args.iter().enumerate() {
                 let mode = modes
                     .as_ref()
@@ -3205,14 +3235,16 @@ pub fn typecheck_fn(
     let mut ctx = InferCtx::new();
     let field_env = build_field_infer_env(env, &mut ctx)?;
     let mut infer_fns = InferFnEnv::new();
-    for (name, sig) in &fns.fns {
-        let params = sig
-            .params
-            .iter()
-            .map(|t| infer_from_ty(&mut ctx, t))
-            .collect();
-        let ret = infer_from_ty(&mut ctx, &sig.ret);
-        infer_fns.insert(name.clone(), InferFnSig { params, ret })?;
+    for (name, sigs) in &fns.fns {
+        for sig in sigs {
+            let params = sig
+                .params
+                .iter()
+                .map(|t| infer_from_ty(&mut ctx, t))
+                .collect();
+            let ret = infer_from_ty(&mut ctx, &sig.ret);
+            infer_fns.insert(name.clone(), InferFnSig { params, ret })?;
+        }
     }
     let mut globals: BTreeMap<String, InferTy> = BTreeMap::new();
     for (name, ty) in global_defs {
@@ -3232,7 +3264,7 @@ pub fn typecheck_fn(
         params,
         ret: ctx.fresh_var(),
     };
-    if infer_fns.get(&f.name).is_none() {
+    if infer_fns.get_arity(&f.name, f.params.len()).is_none() {
         infer_fns.insert(f.name.clone(), sig.clone())?;
     }
     let (param_tys, param_spans) = build_param_maps(f, &sig)?;
@@ -3304,14 +3336,16 @@ fn typecheck_def(
     let mut ctx = InferCtx::new();
     let field_env = build_field_infer_env(env, &mut ctx)?;
     let mut infer_fns = InferFnEnv::new();
-    for (name, sig) in &fns.fns {
-        let params = sig
-            .params
-            .iter()
-            .map(|t| infer_from_ty(&mut ctx, t))
-            .collect();
-        let ret = infer_from_ty(&mut ctx, &sig.ret);
-        infer_fns.insert(name.clone(), InferFnSig { params, ret })?;
+    for (name, sigs) in &fns.fns {
+        for sig in sigs {
+            let params = sig
+                .params
+                .iter()
+                .map(|t| infer_from_ty(&mut ctx, t))
+                .collect();
+            let ret = infer_from_ty(&mut ctx, &sig.ret);
+            infer_fns.insert(name.clone(), InferFnSig { params, ret })?;
+        }
     }
     let mut globals: BTreeMap<String, InferTy> = BTreeMap::new();
     for (name, ty) in global_defs {
@@ -5823,21 +5857,13 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
-                _ if fns.get(op).is_some() => {
-                    let base_sig = fns.get(op).unwrap();
+                _ if fns.get_arity(op, targs.len()).is_some() => {
+                    let base_sig = fns.get_arity(op, targs.len()).unwrap();
                     let sig = if current_fn == Some(op.as_str()) {
                         base_sig.clone()
                     } else {
                         instantiate_sig(ctx, base_sig)
                     };
-                    if targs.len() != sig.params.len() {
-                        return Err(Diag::new(format!(
-                            "function '{}' expects {} arguments",
-                            op,
-                            sig.params.len()
-                        ))
-                        .with_span(span.clone()));
-                    }
                     for (idx, (arg, param_ty)) in targs.iter().zip(sig.params.iter()).enumerate() {
                         ctx.unify(&arg.ty, param_ty, &args[idx].span())?;
                     }
@@ -5849,6 +5875,21 @@ fn infer_expr_type_internal(
                         casts,
                         types,
                     })
+                }
+                _ if fns.get(op).is_some() => {
+                    let supported: Vec<String> = fns
+                        .get(op)
+                        .unwrap()
+                        .iter()
+                        .map(|sig| sig.params.len().to_string())
+                        .collect();
+                    Err(Diag::new(format!(
+                        "function '{}' has no overload with arity {}; available arities: {}",
+                        op,
+                        targs.len(),
+                        supported.join(", ")
+                    ))
+                    .with_span(span.clone()))
                 }
                 "+" | "-" | "*" | "/" | "darcy.op/add" | "darcy.op/sub" | "darcy.op/mul"
                 | "darcy.op/div" => {
