@@ -166,3 +166,41 @@ fn parses_compiler_type_aliases() {
         _ => panic!("expected function"),
     }
 }
+
+#[test]
+fn parses_struct_fields_with_optional_types() {
+    let src = "(defrecord sample [a b:f64 c])";
+    let toks = lex(src).expect("lex ok");
+    let mut parser = Parser::new(toks);
+    let sexps = parser.parse_all().expect("parse sexps");
+    let tops = parse_toplevel(&sexps).expect("parse toplevel");
+
+    match &tops[0] {
+        Top::Struct(sd) => {
+            assert_eq!(sd.fields.len(), 3);
+            assert!(matches!(sd.fields[0].ty, Ty::Unknown));
+            assert!(matches!(sd.fields[1].ty, Ty::Named(ref n) if n == "f64"));
+            assert!(matches!(sd.fields[2].ty, Ty::Unknown));
+        }
+        _ => panic!("expected struct"),
+    }
+}
+
+#[test]
+fn parses_union_variant_fields_with_optional_types() {
+    let src = "(defenum opt (some [x y:i64]))";
+    let toks = lex(src).expect("lex ok");
+    let mut parser = Parser::new(toks);
+    let sexps = parser.parse_all().expect("parse sexps");
+    let tops = parse_toplevel(&sexps).expect("parse toplevel");
+
+    match &tops[0] {
+        Top::Union(ud) => {
+            assert_eq!(ud.variants.len(), 1);
+            assert_eq!(ud.variants[0].fields.len(), 2);
+            assert!(matches!(ud.variants[0].fields[0].ty, Ty::Unknown));
+            assert!(matches!(ud.variants[0].fields[1].ty, Ty::Named(ref n) if n == "i64"));
+        }
+        _ => panic!("expected union"),
+    }
+}

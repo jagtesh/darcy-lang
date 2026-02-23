@@ -973,10 +973,10 @@ where
                 });
             }
             // New style:
+            //   [x]
+            //   [x y]
             //   [x:type]
-            //   [x:type y:type]
-            //   [x type y type]
-            //   [x type]
+            //   [x:type y z:f64]
             Sexp::Brack(items, bspan) => {
                 if items.is_empty() {
                     return Err(Diag::new(format!("{} declaration cannot be empty", kind))
@@ -990,63 +990,28 @@ where
                     })?;
                     syms.push((sym, sp));
                 }
-                if syms.iter().all(|(s, _)| s.contains(':')) {
-                    for (sym, sp) in syms {
-                        let (name_raw, ty_raw) = sym.split_once(':').ok_or_else(|| {
-                            Diag::new(format!("invalid {} declaration", kind)).with_span(sp.clone())
-                        })?;
+                for (sym, sp) in syms {
+                    let (name, ty) = if let Some((name_raw, ty_raw)) = sym.split_once(':') {
                         if name_raw.is_empty() || ty_raw.is_empty() {
                             return Err(Diag::new(format!(
-                                "{} declaration must be name:Type",
+                                "{} declaration must be name or name:Type",
                                 kind
                             ))
                             .with_span(sp.clone()));
                         }
                         let name = ensure_lisp_ident(name_raw, &sp, &format!("{} name", kind))?;
                         let ty = parse_type_from_sym_checked(ty_raw, &sp)?;
-                        out.push(Field {
-                            name: name.clone(),
-                            rust_name: rust_value_name(&name),
-                            ty,
-                            span: sp,
-                        });
-                    }
-                    continue;
-                }
-                if syms.len() == 1 {
-                    let (name_raw, sp) = &syms[0];
-                    let name = ensure_lisp_ident(name_raw, sp, &format!("{} name", kind))?;
-                    out.push(Field {
-                        name: name.clone(),
-                        rust_name: rust_value_name(&name),
-                        ty: Ty::Unknown,
-                        span: sp.clone(),
-                    });
-                    continue;
-                }
-                if syms.len() % 2 != 0 {
-                    return Err(Diag::new(format!(
-                        "{} declarations must be name/type pairs or name:Type",
-                        kind
-                    ))
-                    .with_span(bspan.clone()));
-                }
-                let mut idx = 0usize;
-                while idx < syms.len() {
-                    let (name_raw, nsp) = &syms[idx];
-                    let (ty_raw, tsp) = &syms[idx + 1];
-                    let name = ensure_lisp_ident(name_raw, nsp, &format!("{} name", kind))?;
-                    let ty = parse_type_from_sym_checked(ty_raw, tsp)?;
+                        (name, ty)
+                    } else {
+                        let name = ensure_lisp_ident(&sym, &sp, &format!("{} name", kind))?;
+                        (name, Ty::Unknown)
+                    };
                     out.push(Field {
                         name: name.clone(),
                         rust_name: rust_value_name(&name),
                         ty,
-                        span: Span {
-                            start: nsp.start,
-                            end: tsp.end,
-                        },
+                        span: sp,
                     });
-                    idx += 2;
                 }
             }
             _ => {
