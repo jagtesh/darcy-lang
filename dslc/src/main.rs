@@ -83,7 +83,9 @@ fn main() {
                 eprintln!("{}", render_diag_with_level(&file, &src, w, "warning"));
             }
             if run_mode {
-                let use_runtime = runtime_mode || output.rust.contains("darcy_runtime::");
+                let use_runtime = runtime_mode
+                    || output.rust.contains("darcy_runtime::")
+                    || output.rust.contains("darcy_stdlib::");
                 if let Err(e) = run_rust(&file, &output.rust, use_runtime) {
                     eprintln!("error: {}", e);
                     std::process::exit(1);
@@ -135,6 +137,7 @@ fn run_rust(input: &str, rust_src: &str, use_runtime: bool) -> Result<(), String
 fn run_rust_with_cargo(_input: &str, rust_src: &str) -> Result<(), String> {
     let cwd = env::current_dir().map_err(|e| format!("cannot get cwd: {}", e))?;
     let runtime = runtime_path()?;
+    let stdlib = stdlib_path()?;
     let mut dir = env::temp_dir();
     dir.push(format!("dslc_run_{}", std::process::id()));
     fs::create_dir_all(&dir).map_err(|e| format!("cannot create temp dir: {}", e))?;
@@ -145,8 +148,9 @@ fn run_rust_with_cargo(_input: &str, rust_src: &str) -> Result<(), String> {
 
     fs::write(&main_path, rust_src).map_err(|e| format!("cannot write main.rs: {}", e))?;
     let cargo_contents = format!(
-        "[package]\nname = \"dslc_run\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\ndarcy-runtime = {{ path = \"{}\" }}\n",
-        runtime.display()
+        "[package]\nname = \"dslc_run\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\ndarcy-runtime = {{ path = \"{}\" }}\ndarcy-stdlib = {{ path = \"{}\" }}\n",
+        runtime.display(),
+        stdlib.display()
     );
     fs::write(&cargo_toml, cargo_contents)
         .map_err(|e| format!("cannot write Cargo.toml: {}", e))?;
@@ -170,4 +174,13 @@ fn runtime_path() -> Result<PathBuf, String> {
         return Ok(candidate);
     }
     Err("darcy-runtime not found; run from workspace root".to_string())
+}
+
+fn stdlib_path() -> Result<PathBuf, String> {
+    let cwd = env::current_dir().map_err(|e| format!("cannot get cwd: {}", e))?;
+    let candidate = cwd.join("crates/darcy-stdlib");
+    if candidate.exists() {
+        return Ok(candidate);
+    }
+    Err("darcy-stdlib not found; run from workspace root".to_string())
 }

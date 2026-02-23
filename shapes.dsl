@@ -13,6 +13,8 @@
       (square (s s) (* s s))
       (rect (h h) (w w) (* h w)))))
 
+(def blah {:a 1 :b 2 :c 3})
+
 (defn main []
   (println "Area of triangle with base 5 and height 10: {}"
            (area (triangle 5.0 10.0))))
