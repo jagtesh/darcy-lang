@@ -99,7 +99,7 @@
       "patterns": [
         {
           "name": "storage.type.darcy",
-          "match": "(?:\\\\bbtree\\-map\\\\b|\\\\bhash\\-map\\\\b|\\\\bhashset\\\\b|\\\\bstring\\\\b|\\\\bsymbol\\\\b|\\\\bisize\\\\b|\\\\busize\\\\b|\\\\bbool\\\\b|\\\\bimap\\\\b|\\\\bf32\\\\b|\\\\bf64\\\\b|\\\\bi32\\\\b|\\\\bi64\\\\b|\\\\bu32\\\\b|\\\\bu64\\\\b|\\(\\))"
+          "match": "(?:\\\\bbtree\\-map\\\\b|\\\\bhash\\-map\\\\b|\\\\bhashset\\\\b|\\\\bdouble\\\\b|\\\\bstring\\\\b|\\\\bsymbol\\\\b|\\\\bushort\\\\b|\\\\bfloat\\\\b|\\\\bisize\\\\b|\\\\bsbyte\\\\b|\\\\bshort\\\\b|\\\\bulong\\\\b|\\\\busize\\\\b|\\\\bbool\\\\b|\\\\bbyte\\\\b|\\\\bimap\\\\b|\\\\blong\\\\b|\\\\buint\\\\b|\\\\bf32\\\\b|\\\\bf64\\\\b|\\\\bi16\\\\b|\\\\bi32\\\\b|\\\\bi64\\\\b|\\\\bint\\\\b|\\\\bstr\\\\b|\\\\bu16\\\\b|\\\\bu32\\\\b|\\\\bu64\\\\b|\\(\\)|\\\\bi8\\\\b|\\\\bu8\\\\b)"
         }
       ]
     },

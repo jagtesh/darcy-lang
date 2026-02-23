@@ -7,12 +7,26 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFS_PATH = ROOT / "extensions" / "defs.json"
 VSCODE_GRAMMAR_PATH = ROOT / "extensions" / "vscode" / "syntaxes" / "darcy.tmLanguage.json"
 ZED_GRAMMAR_PATH = ROOT / "extensions" / "zed" / "darcy.tmLanguage.json"
+TYPE_ALIASES_PATH = ROOT / "dslc" / "src" / "type_aliases.rs"
 
 IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
+TYPE_ALIAS_RE = re.compile(r'\("([^"]+)",\s*"([^"]+)"\)')
 
 
 def load_defs() -> dict:
-    return json.loads(DEFS_PATH.read_text())
+    defs = json.loads(DEFS_PATH.read_text())
+    alias_types = load_type_aliases()
+    defs["types"] = sorted(set(defs["types"]).union(alias_types))
+    return defs
+
+
+def load_type_aliases() -> set[str]:
+    text = TYPE_ALIASES_PATH.read_text()
+    out: set[str] = set()
+    for alias, resolved in TYPE_ALIAS_RE.findall(text):
+        out.add(alias)
+        out.add(resolved)
+    return out
 
 
 def token_pattern(token: str) -> str:

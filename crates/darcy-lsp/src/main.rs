@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use dslc::{lex, Tok, TokKind};
@@ -20,9 +21,17 @@ struct SharedDefs {
 impl SharedDefs {
     fn new() -> Self {
         let defs = defs::Defs::load();
+        let mut types = BTreeSet::new();
+        for t in defs.types {
+            types.insert(t);
+        }
+        for (alias, resolved) in dslc::type_aliases() {
+            types.insert((*alias).to_string());
+            types.insert((*resolved).to_string());
+        }
         Self {
             keywords: defs.keywords,
-            types: defs.types,
+            types: types.into_iter().collect(),
             builtins: defs.builtins,
         }
     }
@@ -36,6 +45,7 @@ struct DocState {
 struct Backend {
     client: Client,
     docs: Arc<Mutex<BTreeMap<Url, DocState>>>,
+    workspace_folders: Arc<Mutex<Vec<PathBuf>>>,
     defs: SharedDefs,
 }
 
@@ -44,6 +54,7 @@ impl Backend {
         Self {
             client,
             docs: Arc::new(Mutex::new(BTreeMap::new())),
+            workspace_folders: Arc::new(Mutex::new(Vec::new())),
             defs: SharedDefs::new(),
         }
     }
@@ -58,8 +69,38 @@ impl Backend {
         docs.get(uri).map(|d| d.text.clone())
     }
 
+    async fn set_workspace_folders(&self, params: &InitializeParams) {
+        let mut folders = Vec::new();
+        if let Some(wss) = &params.workspace_folders {
+            for ws in wss {
+                if let Ok(path) = ws.uri.to_file_path() {
+                    push_unique_path(&mut folders, path);
+                }
+            }
+        }
+        if let Some(root) = &params.root_uri {
+            if let Ok(path) = root.to_file_path() {
+                push_unique_path(&mut folders, path);
+            }
+        }
+        #[allow(deprecated)]
+        if let Some(root_path) = &params.root_path {
+            push_unique_path(&mut folders, PathBuf::from(root_path));
+        }
+        if let Ok(cwd) = std::env::current_dir() {
+            push_unique_path(&mut folders, cwd);
+        }
+        let mut state = self.workspace_folders.lock().await;
+        *state = folders;
+    }
+
+    async fn analyze_doc(&self, uri: &Url, text: &str) -> std::result::Result<Analysis, Diag> {
+        let folders = self.workspace_folders.lock().await.clone();
+        analyze_with_context(uri, text, &folders)
+    }
+
     async fn publish_diagnostics(&self, uri: &Url, text: &str) {
-        let diags = match analyze(text) {
+        let diags = match self.analyze_doc(uri, text).await {
             Ok(_) => Vec::new(),
             Err(d) => vec![diag_to_lsp(&d)],
         };
@@ -127,7 +168,8 @@ impl Backend {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        self.set_workspace_folders(&params).await;
         let caps = ServerCapabilities {
             text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
             hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -190,7 +232,7 @@ impl LanguageServer for Backend {
             Some(t) => t,
             None => return Ok(None),
         };
-        let analysis = match analyze(&text) {
+        let analysis = match self.analyze_doc(&uri, &text).await {
             Ok(a) => a,
             Err(_) => return Ok(None),
         };
@@ -217,7 +259,7 @@ impl LanguageServer for Backend {
             Some(t) => t,
             None => return Ok(None),
         };
-        let analysis = match analyze(&text) {
+        let analysis = match self.analyze_doc(&uri, &text).await {
             Ok(a) => a,
             Err(_) => return Ok(None),
         };
@@ -235,7 +277,7 @@ impl LanguageServer for Backend {
             Some(t) => t,
             None => return Ok(None),
         };
-        let analysis = match analyze(&text) {
+        let analysis = match self.analyze_doc(&uri, &text).await {
             Ok(a) => a,
             Err(_) => return Ok(None),
         };
@@ -282,14 +324,65 @@ struct Analysis {
     tokens: Vec<Tok>,
 }
 
-fn analyze(text: &str) -> std::result::Result<Analysis, Diag> {
+fn analyze_with_context(
+    uri: &Url,
+    text: &str,
+    workspace_folders: &[PathBuf],
+) -> std::result::Result<Analysis, Diag> {
     let tokens = lex(text)?;
-    let pipeline = dslc::analyze(text)?;
+    let file_path = match uri.to_file_path() {
+        Ok(path) => path,
+        Err(_) => {
+            let pipeline = dslc::analyze(text)?;
+            return Ok(Analysis {
+                tops: pipeline.tops,
+                typechecked: pipeline.typechecked,
+                tokens,
+            });
+        }
+    };
+    let lib_paths = collect_lib_paths(&file_path, workspace_folders);
+    let tops = dslc::compile_modules(&file_path, text, &lib_paths)?;
+    let typechecked = dslc::typecheck_tops(&tops)?;
     Ok(Analysis {
-        tops: pipeline.tops,
-        typechecked: pipeline.typechecked,
+        tops,
+        typechecked,
         tokens,
     })
+}
+
+fn collect_lib_paths(file_path: &Path, workspace_folders: &[PathBuf]) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(parent) = file_path.parent() {
+        push_unique_path(&mut paths, parent.to_path_buf());
+        for ancestor in parent.ancestors() {
+            let stdlib = ancestor.join("crates/darcy-stdlib/darcy");
+            if stdlib.exists() {
+                push_unique_path(&mut paths, stdlib);
+            }
+        }
+    }
+    for ws in workspace_folders {
+        push_unique_path(&mut paths, ws.clone());
+        let stdlib = ws.join("crates/darcy-stdlib/darcy");
+        if stdlib.exists() {
+            push_unique_path(&mut paths, stdlib);
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        push_unique_path(&mut paths, cwd.clone());
+        let stdlib = cwd.join("crates/darcy-stdlib/darcy");
+        if stdlib.exists() {
+            push_unique_path(&mut paths, stdlib);
+        }
+    }
+    paths
+}
+
+fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    if !paths.iter().any(|p| p == &path) {
+        paths.push(path);
+    }
 }
 
 fn diag_to_lsp(d: &Diag) -> Diagnostic {
@@ -415,6 +508,35 @@ fn format_simple(text: &str) -> String {
         out.push('\n');
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_defs_include_type_aliases() {
+        let defs = SharedDefs::new();
+        assert!(defs.types.iter().any(|t| t == "int"));
+        assert!(defs.types.iter().any(|t| t == "float"));
+    }
+
+    #[test]
+    fn collect_lib_paths_includes_parent_and_workspace() {
+        let file = PathBuf::from("/tmp/work/demo/foo.dsl");
+        let ws = vec![PathBuf::from("/tmp/work")];
+        let paths = collect_lib_paths(&file, &ws);
+        assert!(paths.iter().any(|p| p == Path::new("/tmp/work/demo")));
+        assert!(paths.iter().any(|p| p == Path::new("/tmp/work")));
+    }
+
+    #[test]
+    fn analyze_with_context_accepts_optional_variant_fields() {
+        let src = "(defenum shape (triangle [b h]) (circle [r])) (defn area [s] (case s (triangle (b b) (h h) (* b h)) (circle (r r) r)))";
+        let uri = Url::parse("file:///tmp/shapes.dsl").expect("valid url");
+        let result = analyze_with_context(&uri, src, &[]);
+        assert!(result.is_ok(), "{:?}", result.err().map(|d| d.message));
+    }
 }
 
 #[tokio::main]

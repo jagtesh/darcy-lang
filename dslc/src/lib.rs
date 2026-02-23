@@ -22,6 +22,7 @@ pub use module::compile_modules;
 pub use parser::{Parser, Sexp};
 pub use pipeline::{analyze, PipelineOutput};
 pub use reader::Reader;
+pub use type_aliases::type_aliases;
 pub use typecheck::{typecheck_fn, typecheck_tops, FnEnv, FnSig, TypeEnv, TypecheckedProgram};
 pub use typed::{CastHint, TypedExpr, TypedFn};
 
