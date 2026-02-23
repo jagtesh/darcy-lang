@@ -5044,8 +5044,11 @@ fn infer_expr_type_internal(
                     })
                 }
                 "darcy.fmt/print" | "darcy.fmt/println" => {
-                    if targs.len() != 1 {
-                        return Err(Diag::new("'print' expects 1 argument").with_span(span.clone()));
+                    if targs.is_empty() {
+                        return Err(
+                            Diag::new("'print' expects at least 1 argument")
+                                .with_span(span.clone()),
+                        );
                     }
                     let out_ty = InferTy::Named("()".to_string());
                     types.insert(SpanKey::new(span), out_ty.clone());

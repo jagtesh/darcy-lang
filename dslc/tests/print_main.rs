@@ -45,3 +45,26 @@ fn lowers_fmt_println() {
         out
     );
 }
+
+#[test]
+fn lowers_fmt_println_variadic_template() {
+    let src = "(defn main [x:i64 y:i64] (darcy.fmt/println \"x={} y={}\" x y))";
+    let out = compile(src).expect("compile ok");
+    assert!(out.contains("println!(\"x={} y={}\", x, y)"), "{}", out);
+}
+
+#[test]
+fn lowers_string_interpolation_in_println() {
+    let src = "(defn main [name:string] (darcy.fmt/println \"hi ${name}\"))";
+    let out = compile(src).expect("compile ok");
+    assert!(
+        out.contains("format!(\"hi {}\", darcy_stdlib::rt::fmt_format(name))"),
+        "{}",
+        out
+    );
+    assert!(
+        out.contains("println!(\"{}\", format!(\"hi {}\", darcy_stdlib::rt::fmt_format(name)))"),
+        "{}",
+        out
+    );
+}

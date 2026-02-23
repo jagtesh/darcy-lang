@@ -448,10 +448,39 @@ fn lower_expr(
             }
             s
         }
-        Expr::Str(s, _) => {
-            let lit = format!("{:?}", s);
-            format!("String::from({})", lit)
-        }
+        Expr::Str(s, _) => match parse_interpolated_string(s) {
+            Some(parts) => {
+                let mut fmt_template = String::new();
+                let mut args = Vec::new();
+                for part in parts {
+                    match part {
+                        InterpPart::Text(t) => {
+                            fmt_template.push_str(&escape_format_braces(&t));
+                        }
+                        InterpPart::Expr(name) => {
+                            fmt_template.push_str("{}");
+                            let rust_name = rust_value_name(&name);
+                            let value = if let Some(def) = def_names.get(&rust_name) {
+                                format!("(*{}).clone()", def)
+                            } else {
+                                rust_name
+                            };
+                            args.push(format!("darcy_stdlib::rt::fmt_format({})", value));
+                        }
+                    }
+                }
+                let fmt_lit = format!("{:?}", fmt_template);
+                if args.is_empty() {
+                    format!("String::from({})", fmt_lit)
+                } else {
+                    format!("format!({}, {})", fmt_lit, args.join(", "))
+                }
+            }
+            None => {
+                let lit = format!("{:?}", s);
+                format!("String::from({})", lit)
+            }
+        },
         Expr::Bool(v, _) => v.to_string(),
         Expr::Unit(_) => "()".to_string(),
         Expr::Keyword(s, _) => {
@@ -960,17 +989,19 @@ fn lower_expr(
                 } else {
                     "println"
                 };
+                if args.len() == 1 {
+                    let rendered = lower!(&args[0]);
+                    return format!("{}!(\"{{}}\", {})", macro_name, rendered);
+                }
                 if let Expr::Str(s, _) = &args[0] {
                     let fmt = format!("{:?}", s);
-                    if args.len() == 1 {
-                        return format!("{}!({})", macro_name, fmt);
-                    }
                     let rendered: Vec<String> = args[1..].iter().map(|el| lower!(el)).collect();
                     return format!("{}!({}, {})", macro_name, fmt, rendered.join(", "));
                 } else {
                     // Non-string-literal first argument (e.g., format! result)
-                    let arg = lower!(&args[0]);
-                    return format!("{}!(\"{{}}\", {})", macro_name, arg);
+                    let rendered: Vec<String> = args.iter().map(|el| lower!(el)).collect();
+                    let fmt_parts = vec!["{}"; rendered.len()].join(" ");
+                    return format!("{}!({:?}, {})", macro_name, fmt_parts, rendered.join(", "));
                 }
             }
             if op == "darcy.vec/len" && args.len() == 1 {
@@ -1433,6 +1464,66 @@ fn lower_expr(
 
 fn spans_eq(a: &Span, b: &Span) -> bool {
     a.start.byte == b.start.byte && a.end.byte == b.end.byte
+}
+
+#[derive(Debug)]
+enum InterpPart {
+    Text(String),
+    Expr(String),
+}
+
+fn parse_interpolated_string(s: &str) -> Option<Vec<InterpPart>> {
+    if !s.contains("${") {
+        return None;
+    }
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0usize;
+    let mut current = String::new();
+    let mut parts = Vec::new();
+    while i < chars.len() {
+        if chars[i] == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
+            if !current.is_empty() {
+                parts.push(InterpPart::Text(std::mem::take(&mut current)));
+            }
+            i += 2;
+            let start = i;
+            while i < chars.len() && chars[i] != '}' {
+                i += 1;
+            }
+            if i >= chars.len() {
+                return None;
+            }
+            let name: String = chars[start..i].iter().collect::<String>().trim().to_string();
+            if name.is_empty()
+                || name
+                    .chars()
+                    .any(|ch| ch.is_whitespace() || ch == '{' || ch == '}')
+            {
+                return None;
+            }
+            parts.push(InterpPart::Expr(name));
+            i += 1;
+            continue;
+        }
+        current.push(chars[i]);
+        i += 1;
+    }
+    if !current.is_empty() {
+        parts.push(InterpPart::Text(current));
+    }
+    Some(parts)
+}
+
+fn escape_format_braces(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '{' => out.push_str("{{"),
+            '}' => out.push_str("}}"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 fn expr_ty(types: &BTreeMap<SpanKey, Ty>, span: &Span) -> Option<Ty> {
