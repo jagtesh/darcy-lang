@@ -24,18 +24,21 @@ This repository already includes:
 
 ```json
 {
-  "language_servers": {
+  "lsp": {
     "darcy-lsp": {
-      "command": "darcy-lsp",
-      "args": []
+      "binary": {
+        "path": "darcy-lsp",
+        "arguments": []
+      }
     }
   },
-  "languages": [
-    {
-      "name": "Darcy",
-      "language_servers": ["darcy-lsp"]
+  "languages": {
+    "Darcy": {
+      "language_servers": ["darcy-lsp"],
+      "formatter": "language_server",
+      "format_on_save": "on"
     }
-  ]
+  }
 }
 ```
 
