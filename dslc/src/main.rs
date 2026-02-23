@@ -144,7 +144,7 @@ fn run_rust_with_cargo(_input: &str, rust_src: &str) -> Result<(), String> {
 
     fs::write(&main_path, rust_src).map_err(|e| format!("cannot write main.rs: {}", e))?;
     let cargo_contents = format!(
-        "[package]\nname = \"dslc_run\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\ndarcy-runtime = {{ path = \"{}\" }}\ndarcy-stdlib = {{ path = \"{}\" }}\n",
+        "[package]\nname = \"dslc_run\"\nversion = \"0.3.1\"\nedition = \"2021\"\n\n[dependencies]\ndarcy-runtime = {{ path = \"{}\" }}\ndarcy-stdlib = {{ path = \"{}\" }}\n",
         runtime.display(),
         stdlib.display()
     );

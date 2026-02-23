@@ -2,7 +2,7 @@
   "name": "darcy-language",
   "displayName": "Darcy Language",
   "description": "Language support and LSP client for Darcy (.dsl)",
-  "version": "0.1.0",
+  "version": "0.3.1",
   "publisher": "darcy-lang",
   "license": "MIT",
   "engines": {

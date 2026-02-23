@@ -219,7 +219,7 @@ fn darcy_build_spec() -> String {
         let path = PathBuf::from(root).join("crates/darcy-build");
         format!("{{ path = \"{}\" }}", path.display())
     } else {
-        "\"0.1.0\"".to_string()
+        "\"0.3.1\"".to_string()
     }
 }
 
@@ -228,7 +228,7 @@ fn darcy_stdlib_spec() -> String {
         let path = PathBuf::from(root).join("crates/darcy-stdlib");
         format!("{{ path = \"{}\" }}", path.display())
     } else {
-        "\"0.1.0\"".to_string()
+        "\"0.3.1\"".to_string()
     }
 }
 

@@ -1,6 +1,6 @@
 id = "darcy"
 name = "Darcy"
-version = "0.1.0"
+version = "0.3.1"
 schema_version = 1
 authors = ["Darcy Contributors"]
 description = "Darcy language support"
