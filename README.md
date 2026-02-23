@@ -195,15 +195,15 @@ cargo run -p dslc --release --bin bench_typecheck -- --iters 10000 --save bench/
 flowchart TD
     A[Parse + expand] --> B[Typecheck]
     B --> C[Lower to Rust IR]
-    C --> D[Emit Rust (pass 1)]
+    C --> D["Emit Rust (pass 1)"]
     D --> E{--feedback?}
-    E -->|no| F[Emit Rust (final)]
+    E -->|no| F["Emit Rust (final)"]
     E -->|yes| G[cargo check + JSON diagnostics]
     E -->|yes| H[rust-analyzer diagnostics]
     G --> I[Feedback hints]
     H --> I
     I --> J[Apply hints to typed IR]
-    J --> K[Emit Rust (pass 2)]
+    J --> K["Emit Rust (pass 2)"]
     K --> F
 ```
 
