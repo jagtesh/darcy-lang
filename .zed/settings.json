@@ -2,9 +2,15 @@
   "lsp": {
     "darcy-lsp": {
       "binary": {
-        "path": "darcy-lsp",
+        "path": "/Users/jagtesh/.cargo/bin/darcy-lsp",
         "arguments": []
       }
+    }
+  },
+  "language_servers": {
+    "darcy-lsp": {
+      "command": "/Users/jagtesh/.cargo/bin/darcy-lsp",
+      "args": []
     }
   },
   "languages": {
