@@ -105,7 +105,7 @@ def build_grammar(defs: dict) -> dict:
             "typed_members": {
                 "patterns": [
                     {
-                        "name": "variable.other.member.darcy",
+                        "name": "entity.name.function.darcy",
                         "match": r"\b[A-Za-z_][A-Za-z0-9_?!-]*:[A-Za-z_][A-Za-z0-9_?!-]*\b",
                     }
                 ]

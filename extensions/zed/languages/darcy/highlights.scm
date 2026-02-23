@@ -7,10 +7,10 @@
  (#match? @constant "^:"))
 ((symbol) @constant
  (#match? @constant "^:"))
-((symbol) @variable
- (#match? @variable "^[^:]+:[^:]+$"))
-((keyword) @variable
- (#match? @variable "^[^:]+:[^:]+$"))
+((symbol) @function
+ (#match? @function "^[^:]+:[^:]+$"))
+((keyword) @function
+ (#match? @function "^[^:]+:[^:]+$"))
 ((symbol) @variable
  (#match? @variable "^[^:]"))
 
@@ -21,7 +21,7 @@
 (list
   .
   (symbol) @function
-  (#match? @function "^[^:]"))
+  (#match? @function "^[^:]+$"))
 
 ((symbol) @operator
  (#match? @operator "^(\\+|-|\\*|/|=|>|<|>=|<=|mod|&|\\||->|->>)$"))
