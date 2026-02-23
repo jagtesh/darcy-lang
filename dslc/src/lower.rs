@@ -12,6 +12,7 @@ const ALLOW_LINTS: &[&str] = &[
     "non_shorthand_field_patterns",
     "unused_braces",
     "unused_imports",
+    "non_upper_case_globals",
 ];
 
 type FnNameMap = BTreeMap<(String, usize), String>;
