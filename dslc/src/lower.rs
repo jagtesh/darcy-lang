@@ -1510,7 +1510,11 @@ fn parse_interpolated_string(s: &str) -> Option<Vec<InterpPart>> {
             if i >= chars.len() {
                 return None;
             }
-            let name: String = chars[start..i].iter().collect::<String>().trim().to_string();
+            let name: String = chars[start..i]
+                .iter()
+                .collect::<String>()
+                .trim()
+                .to_string();
             if name.is_empty()
                 || name
                     .chars()

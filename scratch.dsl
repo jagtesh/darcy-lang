@@ -1,10 +1,21 @@
 (require [darcy.fmt :refer [println]])
 (require [darcy.math :as math])
+(require [darcy.io :refer [dbg]])
 
 (defenum games
 	(strategy)
 	(action)
 	(racing))
+
+(defrecord play-session
+	(game games)
+	(times i64))
+
+(defn play-session-dbg [ps]
+	(dbg ps))
+
+(defn play-session-mod [ps]
+	(ps))
 
 (defn choose-game [game]
 	(case game
@@ -30,4 +41,10 @@
 (defn main []
 	(choose-game (racing))
 	(call-me-ishmael "ishmael ")
-	(fact 2))
+	(fact 2)
+	(let [p (play-session (action) 5)]
+		;;(darcy.io/dbg p)))
+		(dbg p)
+		(play-session-dbg p)
+		))
+

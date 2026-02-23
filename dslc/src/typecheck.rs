@@ -27,7 +27,10 @@ impl FnEnv {
 
     pub fn insert(&mut self, name: String, sig: FnSig) -> DslResult<()> {
         let entry = self.fns.entry(name.clone()).or_default();
-        if entry.iter().any(|existing| existing.params.len() == sig.params.len()) {
+        if entry
+            .iter()
+            .any(|existing| existing.params.len() == sig.params.len())
+        {
             return Err(Diag::new(format!(
                 "duplicate function '{}' with arity {}",
                 name,
@@ -130,7 +133,10 @@ impl InferFnEnv {
 
     fn insert(&mut self, name: String, sig: InferFnSig) -> DslResult<()> {
         let entry = self.fns.entry(name.clone()).or_default();
-        if entry.iter().any(|existing| existing.params.len() == sig.params.len()) {
+        if entry
+            .iter()
+            .any(|existing| existing.params.len() == sig.params.len())
+        {
             return Err(Diag::new(format!(
                 "duplicate function '{}' with arity {}",
                 name,
@@ -702,7 +708,7 @@ pub fn typecheck_tops(tops: &[Top]) -> DslResult<TypecheckedProgram> {
                         fd.name,
                         fd.params.len()
                     ))
-                        .with_span(fd.span.clone()));
+                    .with_span(fd.span.clone()));
                 }
                 check_param_bindings(fd, &def_base_names)?;
                 let mut generics = BTreeMap::new();
@@ -2940,14 +2946,8 @@ fn collect_bounds_expr(
                         }
                     }
                 }
-                "darcy.op/lt"
-                | "darcy.op/gt"
-                | "darcy.op/lte"
-                | "darcy.op/gte"
-                | "<"
-                | ">"
-                | "<="
-                | ">=" => {
+                "darcy.op/lt" | "darcy.op/gt" | "darcy.op/lte" | "darcy.op/gte" | "<" | ">"
+                | "<=" | ">=" => {
                     for arg in args {
                         if let Some(ty) = expr_ty(types, arg) {
                             add_bounds_for_ty(ty, bounds, GenericBound::PartialOrd);
@@ -5045,10 +5045,8 @@ fn infer_expr_type_internal(
                 }
                 "darcy.fmt/print" | "darcy.fmt/println" => {
                     if targs.is_empty() {
-                        return Err(
-                            Diag::new("'print' expects at least 1 argument")
-                                .with_span(span.clone()),
-                        );
+                        return Err(Diag::new("'print' expects at least 1 argument")
+                            .with_span(span.clone()));
                     }
                     let out_ty = InferTy::Named("()".to_string());
                     types.insert(SpanKey::new(span), out_ty.clone());
@@ -5287,16 +5285,8 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
-                "darcy.op/gt"
-                | "darcy.op/lt"
-                | "darcy.op/gte"
-                | "darcy.op/lte"
-                | "darcy.op/eq"
-                | "="
-                | "<"
-                | ">"
-                | "<="
-                | ">=" => {
+                "darcy.op/gt" | "darcy.op/lt" | "darcy.op/gte" | "darcy.op/lte" | "darcy.op/eq"
+                | "=" | "<" | ">" | "<=" | ">=" => {
                     if targs.len() != 2 {
                         return Err(Diag::new("'cmp' expects 2 arguments").with_span(span.clone()));
                     }

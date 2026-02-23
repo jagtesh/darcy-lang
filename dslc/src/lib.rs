@@ -9,8 +9,8 @@ mod module;
 mod parser;
 mod pipeline;
 mod reader;
-mod typecheck;
 mod type_aliases;
+mod typecheck;
 mod typed;
 
 pub use ast::{parse_toplevel, Expr, FnDef, StructDef, Top, Ty, UseDecl};

@@ -506,7 +506,8 @@ fn is_callable_ident(name: &str) -> bool {
 }
 
 fn is_callable_ident_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '?' | '!' | '*' | '+' | '=' | '<' | '>' | '$')
+    c.is_ascii_alphanumeric()
+        || matches!(c, '-' | '_' | '?' | '!' | '*' | '+' | '=' | '<' | '>' | '$')
 }
 
 fn ensure_qualified_name(name: &str, span: &Span, kind: &str) -> DslResult<String> {
@@ -967,11 +968,8 @@ where
             //   [x type]
             Sexp::Brack(items, bspan) => {
                 if items.is_empty() {
-                    return Err(Diag::new(format!(
-                        "{} declaration cannot be empty",
-                        kind
-                    ))
-                    .with_span(bspan.clone()));
+                    return Err(Diag::new(format!("{} declaration cannot be empty", kind))
+                        .with_span(bspan.clone()));
                 }
                 let mut syms: Vec<(String, Span)> = Vec::new();
                 for it in items {

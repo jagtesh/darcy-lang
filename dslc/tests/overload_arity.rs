@@ -22,7 +22,8 @@ fn rejects_duplicate_overload_arity() {
     ";
     let err = compile(src).expect_err("expected duplicate arity error");
     assert!(
-        err.message.contains("duplicate function 'foo' with arity 1"),
+        err.message
+            .contains("duplicate function 'foo' with arity 1"),
         "unexpected error: {}",
         err.message
     );
@@ -37,7 +38,8 @@ fn rejects_missing_overload_arity() {
     ";
     let err = compile(src).expect_err("expected arity mismatch error");
     assert!(
-        err.message.contains("function 'foo' has no overload with arity 3"),
+        err.message
+            .contains("function 'foo' has no overload with arity 3"),
         "unexpected error: {}",
         err.message
     );

@@ -82,6 +82,19 @@ Files:
   - `extensions/vscode/syntaxes/darcy.tmLanguage.json`
   - `extensions/zed/darcy.tmLanguage.json`
 
+## Git Hooks
+
+Install repo-managed hooks:
+
+```bash
+make hooks-install
+```
+
+Current pre-commit hook runs:
+- `cargo fmt --all` (auto-formats and stages tracked files)
+- `make grammars-check`
+- `make test`
+
 ## Language Snapshot
 
 Top-level forms:

@@ -5,8 +5,15 @@ if [[ ! -f './Cargo.toml' ]]; then
 	exit 1
 fi
 
+
+
 if [[ $# -eq 1 ]]; then
-	cargo run --bin dslc -- "$1" -L "$PWD/crates/darcy-stdlib/darcy"
+    which rustfmt > /dev/null 2>&1
+    if [[ $? -ne 0 ]]; then
+        cargo run --bin dslc -- "$1" -L "$PWD/crates/darcy-stdlib/darcy"
+    else
+        cargo run --bin dslc -- "$1" -L "$PWD/crates/darcy-stdlib/darcy" | rustfmt
+    fi
 elif [[ $# -eq 2 ]]; then
 	if [[ "$1" == "run" ]] || [[ "$1" == "build" ]]; then
 		cargo run --bin dslc -- "$@" -L "$PWD/crates/darcy-stdlib/darcy"

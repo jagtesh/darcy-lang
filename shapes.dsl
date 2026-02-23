@@ -4,12 +4,14 @@
   (square [s:f64])
   (rect [h:f64 w:f64]))
 
+
 (defn area [s:shape]
-  (case s
-    (triangle (b b) (h h) (* b h))
-    (circle (r r) (* 3.141592653589793 (* r r)))
-    (square (s s) (* s s))
-    (rect (h h) (w w) (* h w))))
+  (let [pi 3.141592653589793]
+    (case s
+      (triangle (b b) (h h) (* b h))
+      (circle (r r) (* pi (* r r)))
+      (square (s s) (* s s))
+      (rect (h h) (w w) (* h w)))))
 
 (defn main []
   (println "Area of triangle with base 5 and height 10: {}"

@@ -4,11 +4,6 @@
 
 (defextern clone [v:t0] t0 "darcy_stdlib::rt::core_clone")
 
-;; helper macro for adding simple function aliases without needing defin
-(defmacro defn-alias [name target]
-  `(defmacro ~name [& args]
-    `(~target ~@args))
-
 (defin add [a b] (darcy.op/add a b))
 (defin sub [a b] (darcy.op/sub a b))
 (defin mul [a b] (darcy.op/mul a b))
@@ -30,7 +25,7 @@
 (defin clamp [x lo hi] (darcy.math/clamp x lo hi))
 
 ;; built-in io/format helpers
-(defn-alias println darcy.fmt/println)
-(defn-alias print darcy.fmt/print)
-(defn-alias dbg darcy.io/dbg)
-(defn-alias format darcy.fmt/format)
+(defmacro println [& args] `(darcy.fmt/println ~@args))
+(defmacro print [& args] `(darcy.fmt/print ~@args))
+(defmacro dbg [& args] `(darcy.io/dbg ~@args))
+(defmacro format [& args] `(darcy.fmt/format ~@args))

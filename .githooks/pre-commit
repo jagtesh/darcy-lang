@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+echo "[pre-commit] running cargo fmt"
+cargo fmt --all
+git add -u
+
+echo "[pre-commit] checking generated grammars"
+make grammars-check
+
+echo "[pre-commit] running test suites"
+make test
+
+echo "[pre-commit] ok"

@@ -5,7 +5,7 @@ BENCH_HISTORY ?= bench/history
 BENCH_LABEL ?= main
 BENCH_MAX_PCT ?= 5
 
-.PHONY: bench-typecheck-run bench-check bench-accept vscode-deps vscode-package grammars grammars-check
+.PHONY: bench-typecheck-run bench-check bench-accept vscode-deps vscode-package grammars grammars-check fmt test precommit hooks-install
 
 bench-typecheck-run:
 	cargo run -p dslc --release --bin bench_typecheck -- --iters $(BENCH_ITERS) --save $(BENCH_CANDIDATE) --save-dir $(BENCH_HISTORY) --label $(BENCH_LABEL)
@@ -28,3 +28,15 @@ grammars:
 grammars-check:
 	python3 extensions/gen_grammars.py
 	git diff --exit-code -- extensions/vscode/syntaxes/darcy.tmLanguage.json extensions/zed/darcy.tmLanguage.json
+
+fmt:
+	cargo fmt --all
+
+test:
+	cargo test --workspace
+
+precommit: fmt grammars-check test
+
+hooks-install:
+	git config core.hooksPath .githooks
+	chmod +x .githooks/pre-commit
