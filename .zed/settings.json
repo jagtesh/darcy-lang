@@ -10,10 +10,17 @@
       }
     }
   },
-  "language_servers": {
-    "darcy-lsp": {
-      "command": "/Users/jagtesh/.cargo/bin/darcy-lsp",
-      "args": []
+  "languages": {
+    "Darcy": {
+      "language_servers": [
+        "darcy-lsp"
+      ],
+      "formatter": {
+        "language_server": {
+          "name": "darcy-lsp"
+        }
+      },
+      "format_on_save": "on"
     }
   }
 }
