@@ -93,15 +93,17 @@ Current pre-commit hook runs:
 ## Language Snapshot
 
 Top-level forms:
-- Records: `(defrecord name (field Type) ...)`
-- Enums: `(defenum name (variant (field Type) ...) ...)`
+- Records: `(defrecord name [field:type ...])` (types optional: `[field ...]`)
+- Enums: `(defenum name (variant [field:type ...]) ...)` (types optional inside variant field vectors)
 - Functions: `(defn name [params] expr)`
 - Macros: `(defmacro name [params] expr)`
 - Inline defs: `(defin name [params] expr)` (expanded before typechecking)
 - Values: `(def name expr)`
 
 Expressions (selected):
-- Literals: ints (default `i64`), floats (`f64`), strings, `true`/`false`, `nil` (`()`), keywords (`:key`)
+- Literals: ints (default `i64`), floats (`f64`), strings, `true`/`false`, `nil` (`()`), symbols (`:key`)
+- Symbol forms: `:x`, `:ns/x`, `::x`, `::alias/x`
+- `::x` resolves to the current module namespace, `::alias/x` resolves via `require` alias
 - Control flow: `(if cond then [else])`, `(when cond expr ...)`, `(cond (test expr) ... (else expr))`
 - Sequencing/binding: `(do ...)`, `(let [x 1 y 2] ...)`, `(let! x expr)` (assignment, returns `()`)
 - Functions: `(fn [x] ...)`, calls: `(f a b)` (plus `(call f a b)` for dynamic calls)
@@ -112,6 +114,8 @@ Expressions (selected):
 - Case on enums: `(case x (variant (field v) expr) (_ expr))`
 - Threading macros: `(-> x (f 1) g)`, `(->> xs (map f) (take 10))`
 - Reader conveniences: `;` line comments, `#| |#` block comments, commas are whitespace, `#_` discards the next form
+- Type shorthand `name:type` is only valid in params/bindings/field declarations
+- Use `(type expr Type)` for expression type ascription (`x:type` in expression position is rejected)
 
 Interop (selected):
 - Extern wrapper: `(extern (defrecord ...))`, `(extern (defenum ...))`, `(extern (defn name [params] RetType))`
