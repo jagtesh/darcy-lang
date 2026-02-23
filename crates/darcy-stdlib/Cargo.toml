@@ -3,6 +3,9 @@ name = "darcy-stdlib"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies]
+indexmap = "2"
+
 [features]
 darcy-compiled = []
 default = ["darcy-compiled"]

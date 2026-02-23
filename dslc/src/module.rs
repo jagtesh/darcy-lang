@@ -908,6 +908,7 @@ fn is_primitive_type(name: &str) -> bool {
             | "isize"
             | "()"
             | "string"
+            | "keyword"
     )
 }
 
@@ -960,6 +961,22 @@ fn builtin_module_defs() -> BTreeMap<String, ModuleDefs> {
     core_hashmap.fns.insert("insert".to_string());
     core_hashmap.fns.insert("remove".to_string());
     out.insert("darcy.hash-map".to_string(), core_hashmap);
+
+    let mut core_imap = ModuleDefs {
+        types: BTreeSet::new(),
+        variants: BTreeSet::new(),
+        fns: BTreeSet::new(),
+        inlines: BTreeSet::new(),
+        values: BTreeSet::new(),
+    };
+    core_imap.fns.insert("new".to_string());
+    core_imap.fns.insert("len".to_string());
+    core_imap.fns.insert("is-empty".to_string());
+    core_imap.fns.insert("get".to_string());
+    core_imap.fns.insert("contains".to_string());
+    core_imap.fns.insert("insert".to_string());
+    core_imap.fns.insert("remove".to_string());
+    out.insert("darcy.imap".to_string(), core_imap);
 
     let mut core_btreemap = ModuleDefs {
         types: BTreeSet::new(),

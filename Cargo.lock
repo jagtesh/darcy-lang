@@ -527,6 +527,7 @@ name = "darcy-stdlib"
 version = "0.1.0"
 dependencies = [
  "darcy-build",
+ "indexmap",
 ]
 
 [[package]]

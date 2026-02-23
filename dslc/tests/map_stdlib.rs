@@ -14,7 +14,8 @@ fn hashmap_literal_lowers() {
 fn hashmap_brace_literal_lowers() {
     let src = "(defn main [] {:a 1 :b 2})";
     let out = compile(src).expect("compile ok");
-    assert!(out.contains("HashMap"), "{}", out);
+    assert!(out.contains("darcy_stdlib::rt::IMap"), "{}", out);
+    assert!(out.contains("darcy_stdlib::rt::keyword"), "{}", out);
     assert!(out.contains("insert"), "{}", out);
 }
 
@@ -43,7 +44,7 @@ fn btreemap_literal_lowers() {
 
 #[test]
 fn hashmap_get_contains_lowers() {
-    let src = "(defn main [m:hash-map<string,i32>] (darcy.hash-map/contains m :a))";
+    let src = "(defn main [m:hash-map<keyword,i32>] (darcy.hash-map/contains m :a))";
     let out = compile(src).expect("compile ok");
     assert!(out.contains("contains_key"), "{}", out);
 }
@@ -63,4 +64,12 @@ fn hashmap_alias_new_lowers() {
         .expect("compile ok")
         .rust;
     assert!(out.contains("HashMap"), "{}", out);
+}
+
+#[test]
+fn imap_new_and_remove_lower() {
+    let src = "(defn main [] (darcy.imap/remove (darcy.imap/new [:a 1] [:b 2]) :a))";
+    let out = compile(src).expect("compile ok");
+    assert!(out.contains("darcy_stdlib::rt::IMap"), "{}", out);
+    assert!(out.contains("shift_remove"), "{}", out);
 }

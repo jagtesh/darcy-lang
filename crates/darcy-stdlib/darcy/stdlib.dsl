@@ -8,6 +8,7 @@
 (require [darcy.option])
 (require [darcy.result])
 (require [darcy.hash-map])
+(require [darcy.imap])
 (require [darcy.btree-map])
 (require [darcy.rand])
 (require [darcy.tensor])

@@ -1,5 +1,27 @@
+use indexmap::IndexMap;
+use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex, Weak};
+
+pub type Keyword = Arc<str>;
+pub type IMap<K, V> = IndexMap<K, V>;
+
+static KEYWORD_INTERNER: LazyLock<Mutex<HashMap<String, Weak<str>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub fn keyword(name: &str) -> Keyword {
+    let mut interner = KEYWORD_INTERNER
+        .lock()
+        .expect("keyword interner lock poisoned");
+    if let Some(existing) = interner.get(name) {
+        if let Some(upgraded) = existing.upgrade() {
+            return upgraded;
+        }
+    }
+    let interned: Arc<str> = Arc::from(name);
+    interner.insert(name.to_string(), Arc::downgrade(&interned));
+    interned
+}
 
 pub fn core_clone<T: Clone>(val: &T) -> T {
     val.clone()

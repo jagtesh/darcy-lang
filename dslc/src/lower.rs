@@ -882,7 +882,7 @@ fn lower_expr(
         Expr::Unit(_) => "()".to_string(),
         Expr::Keyword(s, _) => {
             let lit = format!("{:?}", s);
-            format!("String::from({})", lit)
+            format!("darcy_stdlib::rt::keyword({})", lit)
         }
         Expr::Pair { .. } => "/* invalid pair */".to_string(),
         Expr::Var(v, sp) => {
@@ -1206,6 +1206,7 @@ fn lower_expr(
         Expr::Continue { .. } => "continue".to_string(),
         Expr::MapLit { kind, entries, .. } => {
             let map_ty = match kind {
+                MapKind::IMap => "darcy_stdlib::rt::IMap",
                 MapKind::Hash => "std::collections::HashMap",
                 MapKind::BTree => "std::collections::BTreeMap",
             };
@@ -1559,9 +1560,11 @@ fn lower_expr(
                 let fallback = lower!(&args[1]);
                 return format!("({}).unwrap_or({})", res, fallback);
             }
-            if op == "darcy.hash-map/new" || op == "darcy.btree-map/new" {
+            if op == "darcy.hash-map/new" || op == "darcy.imap/new" || op == "darcy.btree-map/new" {
                 let map_ty = if op == "darcy.hash-map/new" {
                     "std::collections::HashMap"
+                } else if op == "darcy.imap/new" {
+                    "darcy_stdlib::rt::IMap"
                 } else {
                     "std::collections::BTreeMap"
                 };
@@ -1640,31 +1643,40 @@ fn lower_expr(
                     );
                 }
             }
-            if op == "darcy.hash-map/get" || op == "darcy.btree-map/get" {
+            if op == "darcy.hash-map/get" || op == "darcy.imap/get" || op == "darcy.btree-map/get" {
                 if args.len() == 2 {
                     let map = lower!(&args[0]);
                     let key = lower!(&args[1]);
                     return format!("(&({})).get(&{}).cloned()", map, key);
                 }
             }
-            if op == "darcy.hash-map/contains" || op == "darcy.btree-map/contains" {
+            if op == "darcy.hash-map/contains"
+                || op == "darcy.imap/contains"
+                || op == "darcy.btree-map/contains"
+            {
                 if args.len() == 2 {
                     let map = lower!(&args[0]);
                     let key = lower!(&args[1]);
                     return format!("(&({})).contains_key(&{})", map, key);
                 }
             }
-            if op == "darcy.hash-map/len" || op == "darcy.btree-map/len" {
+            if op == "darcy.hash-map/len" || op == "darcy.imap/len" || op == "darcy.btree-map/len" {
                 if args.len() == 1 {
                     return format!("(&({})).len()", lower!(&args[0]));
                 }
             }
-            if op == "darcy.hash-map/is-empty" || op == "darcy.btree-map/is-empty" {
+            if op == "darcy.hash-map/is-empty"
+                || op == "darcy.imap/is-empty"
+                || op == "darcy.btree-map/is-empty"
+            {
                 if args.len() == 1 {
                     return format!("(&({})).is_empty()", lower!(&args[0]));
                 }
             }
-            if op == "darcy.hash-map/insert" || op == "darcy.btree-map/insert" {
+            if op == "darcy.hash-map/insert"
+                || op == "darcy.imap/insert"
+                || op == "darcy.btree-map/insert"
+            {
                 if args.len() == 3 {
                     let map = lower!(&args[0]);
                     let key = lower!(&args[1]);
@@ -1675,10 +1687,19 @@ fn lower_expr(
                     );
                 }
             }
-            if op == "darcy.hash-map/remove" || op == "darcy.btree-map/remove" {
+            if op == "darcy.hash-map/remove"
+                || op == "darcy.imap/remove"
+                || op == "darcy.btree-map/remove"
+            {
                 if args.len() == 2 {
                     let map = lower!(&args[0]);
                     let key = lower!(&args[1]);
+                    if op == "darcy.imap/remove" {
+                        return format!(
+                            "{{ let mut __m = ({}).clone(); __m.shift_remove(&{}); __m }}",
+                            map, key
+                        );
+                    }
                     return format!(
                         "{{ let mut __m = ({}).clone(); __m.remove(&{}); __m }}",
                         map, key
@@ -2216,6 +2237,7 @@ fn ty_rust_infer(ty: &Ty, type_names: &BTreeMap<String, String>) -> String {
         ),
         Ty::Map(kind, k, v) => {
             let name = match kind {
+                MapKind::IMap => "darcy_stdlib::rt::IMap",
                 MapKind::Hash => "std::collections::HashMap",
                 MapKind::BTree => "std::collections::BTreeMap",
             };
@@ -2251,9 +2273,12 @@ fn ty_rust(ty: &Ty, type_names: &BTreeMap<String, String>) -> String {
                     | "isize"
                     | "()"
                     | "string"
+                    | "keyword"
             ) {
                 if s == "string" {
                     "String".to_string()
+                } else if s == "keyword" {
+                    "darcy_stdlib::rt::Keyword".to_string()
                 } else {
                     s.clone()
                 }
@@ -2274,6 +2299,7 @@ fn ty_rust(ty: &Ty, type_names: &BTreeMap<String, String>) -> String {
         ),
         Ty::Map(kind, k, v) => {
             let name = match kind {
+                MapKind::IMap => "darcy_stdlib::rt::IMap",
                 MapKind::Hash => "std::collections::HashMap",
                 MapKind::BTree => "std::collections::BTreeMap",
             };

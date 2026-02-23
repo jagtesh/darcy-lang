@@ -498,6 +498,7 @@ fn infer_ty_rust(ctx: &InferCtx, ty: &InferTy) -> String {
         }
         InferTy::Map(kind, k, v) => {
             let name = match kind {
+                MapKind::IMap => "IMap",
                 MapKind::Hash => "HashMap",
                 MapKind::BTree => "BTreeMap",
             };
@@ -2253,16 +2254,26 @@ fn builtin_param_modes() -> BTreeMap<String, Vec<ParamMode>> {
         vec![ParamMode::ByRef, ParamMode::ByRef],
     );
     out.insert("darcy.hash-map/len".to_string(), vec![ParamMode::ByRef]);
+    out.insert("darcy.imap/len".to_string(), vec![ParamMode::ByRef]);
     out.insert(
         "darcy.hash-map/is-empty".to_string(),
         vec![ParamMode::ByRef],
     );
+    out.insert("darcy.imap/is-empty".to_string(), vec![ParamMode::ByRef]);
     out.insert(
         "darcy.hash-map/get".to_string(),
         vec![ParamMode::ByRef, ParamMode::ByVal],
     );
     out.insert(
+        "darcy.imap/get".to_string(),
+        vec![ParamMode::ByRef, ParamMode::ByVal],
+    );
+    out.insert(
         "darcy.hash-map/contains".to_string(),
+        vec![ParamMode::ByRef, ParamMode::ByVal],
+    );
+    out.insert(
+        "darcy.imap/contains".to_string(),
         vec![ParamMode::ByRef, ParamMode::ByVal],
     );
     out.insert("darcy.btree-map/len".to_string(), vec![ParamMode::ByRef]);
@@ -3879,7 +3890,7 @@ fn infer_expr_type_internal(
             })
         }
         Expr::Keyword(_, sp) => {
-            let ty = InferTy::Named("string".to_string());
+            let ty = InferTy::Named("keyword".to_string());
             let mut types = BTreeMap::new();
             types.insert(SpanKey::new(sp), ty.clone());
             Ok(InferExpr {
@@ -4804,7 +4815,7 @@ fn infer_expr_type_internal(
 
             if entries.is_empty() && ann.is_none() {
                 return Err(Diag::new(
-                    "cannot infer map type from empty literal; add hash-map<K,V> annotation",
+                    "cannot infer map type from empty literal; add imap<K,V> annotation",
                 )
                 .with_span(span.clone()));
             }
@@ -5110,15 +5121,17 @@ fn infer_expr_type_internal(
             })
         }
         Expr::Call { op, args, span } => {
-            if op == "darcy.hash-map/new" || op == "darcy.btree-map/new" {
+            if op == "darcy.hash-map/new" || op == "darcy.imap/new" || op == "darcy.btree-map/new" {
                 let kind = if op == "darcy.hash-map/new" {
                     MapKind::Hash
+                } else if op == "darcy.imap/new" {
+                    MapKind::IMap
                 } else {
                     MapKind::BTree
                 };
                 if args.is_empty() {
                     return Err(Diag::new(
-                        "cannot infer map type from empty literal; add hash-map<K,V> annotation",
+                        "cannot infer map type from empty literal; add imap<K,V> annotation",
                     )
                     .with_span(span.clone()));
                 }
@@ -5852,12 +5865,14 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
-                "darcy.hash-map/len" | "darcy.btree-map/len" => {
+                "darcy.hash-map/len" | "darcy.imap/len" | "darcy.btree-map/len" => {
                     if targs.len() != 1 {
                         return Err(Diag::new("'len' expects 1 argument").with_span(span.clone()));
                     }
                     let kind = if op.starts_with("darcy.hash-map/") {
                         MapKind::Hash
+                    } else if op.starts_with("darcy.imap/") {
+                        MapKind::IMap
                     } else {
                         MapKind::BTree
                     };
@@ -5871,7 +5886,7 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
-                "darcy.hash-map/is-empty" | "darcy.btree-map/is-empty" => {
+                "darcy.hash-map/is-empty" | "darcy.imap/is-empty" | "darcy.btree-map/is-empty" => {
                     if targs.len() != 1 {
                         return Err(
                             Diag::new("'is-empty' expects 1 argument").with_span(span.clone())
@@ -5879,6 +5894,8 @@ fn infer_expr_type_internal(
                     }
                     let kind = if op.starts_with("darcy.hash-map/") {
                         MapKind::Hash
+                    } else if op.starts_with("darcy.imap/") {
+                        MapKind::IMap
                     } else {
                         MapKind::BTree
                     };
@@ -5892,12 +5909,14 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
-                "darcy.hash-map/get" | "darcy.btree-map/get" => {
+                "darcy.hash-map/get" | "darcy.imap/get" | "darcy.btree-map/get" => {
                     if targs.len() != 2 {
                         return Err(Diag::new("'get' expects 2 arguments").with_span(span.clone()));
                     }
                     let kind = if op.starts_with("darcy.hash-map/") {
                         MapKind::Hash
+                    } else if op.starts_with("darcy.imap/") {
+                        MapKind::IMap
                     } else {
                         MapKind::BTree
                     };
@@ -5912,7 +5931,7 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
-                "darcy.hash-map/contains" | "darcy.btree-map/contains" => {
+                "darcy.hash-map/contains" | "darcy.imap/contains" | "darcy.btree-map/contains" => {
                     if targs.len() != 2 {
                         return Err(
                             Diag::new("'contains' expects 2 arguments").with_span(span.clone())
@@ -5920,6 +5939,8 @@ fn infer_expr_type_internal(
                     }
                     let kind = if op.starts_with("darcy.hash-map/") {
                         MapKind::Hash
+                    } else if op.starts_with("darcy.imap/") {
+                        MapKind::IMap
                     } else {
                         MapKind::BTree
                     };
@@ -5934,7 +5955,7 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
-                "darcy.hash-map/insert" | "darcy.btree-map/insert" => {
+                "darcy.hash-map/insert" | "darcy.imap/insert" | "darcy.btree-map/insert" => {
                     if targs.len() != 3 {
                         return Err(
                             Diag::new("'insert' expects 3 arguments").with_span(span.clone())
@@ -5942,6 +5963,8 @@ fn infer_expr_type_internal(
                     }
                     let kind = if op.starts_with("darcy.hash-map/") {
                         MapKind::Hash
+                    } else if op.starts_with("darcy.imap/") {
+                        MapKind::IMap
                     } else {
                         MapKind::BTree
                     };
@@ -5957,7 +5980,7 @@ fn infer_expr_type_internal(
                         types,
                     })
                 }
-                "darcy.hash-map/remove" | "darcy.btree-map/remove" => {
+                "darcy.hash-map/remove" | "darcy.imap/remove" | "darcy.btree-map/remove" => {
                     if targs.len() != 2 {
                         return Err(
                             Diag::new("'remove' expects 2 arguments").with_span(span.clone())
@@ -5965,6 +5988,8 @@ fn infer_expr_type_internal(
                     }
                     let kind = if op.starts_with("darcy.hash-map/") {
                         MapKind::Hash
+                    } else if op.starts_with("darcy.imap/") {
+                        MapKind::IMap
                     } else {
                         MapKind::BTree
                     };

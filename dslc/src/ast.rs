@@ -17,6 +17,7 @@ pub enum Ty {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MapKind {
+    IMap,
     Hash,
     BTree,
 }
@@ -31,6 +32,7 @@ impl Ty {
             Ty::Result(ok, err) => format!("Result<{}, {}>", ok.rust(), err.rust()),
             Ty::Map(kind, k, v) => {
                 let ty = match kind {
+                    MapKind::IMap => "darcy_stdlib::rt::IMap",
                     MapKind::Hash => "std::collections::HashMap",
                     MapKind::BTree => "std::collections::BTreeMap",
                 };
@@ -378,6 +380,14 @@ fn parse_type_from_sym(s: &str) -> Ty {
             return Ty::Map(MapKind::Hash, Box::new(k), Box::new(v));
         }
     }
+    if let Some(inner) = parse_generic_inner(s, "imap") {
+        let args = split_type_args(inner);
+        if args.len() == 2 {
+            let k = parse_type_from_sym(args[0]);
+            let v = parse_type_from_sym(args[1]);
+            return Ty::Map(MapKind::IMap, Box::new(k), Box::new(v));
+        }
+    }
     if let Some(inner) = parse_generic_inner(s, "btree-map") {
         let args = split_type_args(inner);
         if args.len() == 2 {
@@ -477,6 +487,7 @@ fn is_primitive_type(name: &str) -> bool {
             | "isize"
             | "()"
             | "string"
+            | "keyword"
             | "hashset"
     )
 }
@@ -1427,7 +1438,10 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                 }
                 return Ok(Expr::Continue { span: span.clone() });
             }
-            if op.starts_with("darcy.hash-map/new") || op.starts_with("darcy.btree-map/new") {
+            if op.starts_with("darcy.hash-map/new")
+                || op.starts_with("darcy.imap/new")
+                || op.starts_with("darcy.btree-map/new")
+            {
                 let (kind, ann) = if let Some(inner) = op.strip_prefix("darcy.hash-map/new<") {
                     let inner = inner.strip_suffix('>').ok_or_else(|| {
                         Diag::new("map constructor type annotation must end with '>'")
@@ -1441,6 +1455,19 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                     let k = parse_type_from_sym_checked(args[0], &op_span)?;
                     let v = parse_type_from_sym_checked(args[1], &op_span)?;
                     (MapKind::Hash, Some((k, v)))
+                } else if let Some(inner) = op.strip_prefix("darcy.imap/new<") {
+                    let inner = inner.strip_suffix('>').ok_or_else(|| {
+                        Diag::new("map constructor type annotation must end with '>'")
+                            .with_span(op_span.clone())
+                    })?;
+                    let args = split_type_args(inner);
+                    if args.len() != 2 {
+                        return Err(Diag::new("map type annotation must be imap<K,V>")
+                            .with_span(op_span.clone()));
+                    }
+                    let k = parse_type_from_sym_checked(args[0], &op_span)?;
+                    let v = parse_type_from_sym_checked(args[1], &op_span)?;
+                    (MapKind::IMap, Some((k, v)))
                 } else if let Some(inner) = op.strip_prefix("darcy.btree-map/new<") {
                     let inner = inner.strip_suffix('>').ok_or_else(|| {
                         Diag::new("map constructor type annotation must end with '>'")
@@ -1456,6 +1483,8 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                     (MapKind::BTree, Some((k, v)))
                 } else if op == "darcy.hash-map/new" {
                     (MapKind::Hash, None)
+                } else if op == "darcy.imap/new" {
+                    (MapKind::IMap, None)
                 } else {
                     (MapKind::BTree, None)
                 };
@@ -1651,7 +1680,7 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                 entries.push((parse_expr(key)?, parse_expr(val)?));
             }
             Ok(Expr::MapLit {
-                kind: MapKind::Hash,
+                kind: MapKind::IMap,
                 entries,
                 span: span.clone(),
                 ann: None,
