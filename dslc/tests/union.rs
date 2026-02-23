@@ -11,14 +11,14 @@ fn lowers_union_and_match() {
 
 #[test]
 fn rejects_non_exhaustive_match() {
-    let src = "(defenum opt (some (v i32)) (none)) (defn f [o:opt] (case o (some (v v) v)))";
+    let src = "(defenum opt (some [v:i32]) (none)) (defn f [o:opt] (case o (some (v v) v)))";
     let err = compile(src).expect_err("expected non-exhaustive match");
     assert!(err.message.contains("non-exhaustive"), "{}", err.message);
 }
 
 #[test]
 fn wildcard_match_ok() {
-    let src = "(defenum opt (some (v i32)) (none)) (defn f [o:opt] (case o (some (v v) v) (_ 0)))";
+    let src = "(defenum opt (some [v:i32]) (none)) (defn f [o:opt] (case o (some (v v) v) (_ 0)))";
     let out = compile(src).expect("compile ok");
     assert!(out.contains("_ => 0"));
 }

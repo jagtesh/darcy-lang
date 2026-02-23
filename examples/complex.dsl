@@ -1,7 +1,7 @@
 (defrecord order
-  (id i32)
-  (qty i32)
-  (price f64))
+  [id:i32]
+  [qty:i32]
+  [price:f64])
 
 
 (defn total-prices [os:vec<order>]

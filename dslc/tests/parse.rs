@@ -2,7 +2,7 @@ use dslc::{lex, parse_toplevel, Expr, Parser, Top};
 
 #[test]
 fn parses_struct_and_fn() {
-    let src = "(defrecord order (qty u32)) (defn total [o:order] o.qty)";
+    let src = "(defrecord order [qty:u32]) (defn total [o:order] o.qty)";
     let toks = lex(src).expect("lex ok");
     let mut parser = Parser::new(toks);
     let sexps = parser.parse_all().expect("parse sexps");
@@ -54,7 +54,7 @@ fn parses_map_literal_and_keywords() {
 
 #[test]
 fn parses_case_alias() {
-    let src = "(defenum outcome (ok (v i32)) (err (msg string))) (defn demo [o:outcome] (case o (ok (v x) x) (_ 0)))";
+    let src = "(defenum outcome (ok [v:i32]) (err [msg:string])) (defn demo [o:outcome] (case o (ok (v x) x) (_ 0)))";
     let toks = lex(src).expect("lex ok");
     let mut parser = Parser::new(toks);
     let sexps = parser.parse_all().expect("parse sexps");

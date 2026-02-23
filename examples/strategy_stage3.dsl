@@ -1,8 +1,8 @@
 ; Stage 3: multi-asset portfolio sketch with vector broadcasting
  
 (defrecord position
-  (asset i32)
-  (weight f64))
+  [asset:i32]
+  [weight:f64])
  
 (defenum bias
   (risk-on)

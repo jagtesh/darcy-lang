@@ -24,7 +24,7 @@ fn rejects_missing_field() {
 
 #[test]
 fn rejects_unconstrained_param() {
-    let src = "(defrecord order (qty u32)) (defn total [o] o)";
+    let src = "(defrecord order [qty:u32]) (defn total [o] o)";
     let out = compile(src).expect("compile ok");
     assert!(out.contains("fn total<T"), "{}", out);
 }

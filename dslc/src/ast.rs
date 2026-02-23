@@ -850,35 +850,7 @@ pub fn parse_struct(se: &Sexp) -> DslResult<StructDef> {
         .ok_or_else(|| Diag::new("expected struct name").with_span(se_span(&items[1])))?;
     let name = ensure_lisp_ident(&name, &name_sp, "struct name")?;
 
-    let mut fields = Vec::new();
-    for f in items.iter().skip(2) {
-        let (fitems, fspan) = match f {
-            Sexp::List(v, sp) => (v, sp.clone()),
-            _ => return Err(Diag::new("field must be (name Type)").with_span(se_span(f))),
-        };
-        if fitems.is_empty() || fitems.len() > 2 {
-            return Err(Diag::new("field must be (name Type) or (name)").with_span(fspan));
-        }
-        let (fname, fsp) = atom_sym(&fitems[0])
-            .ok_or_else(|| Diag::new("expected field name").with_span(se_span(&fitems[0])))?;
-        let fname = ensure_lisp_ident(&fname, &fsp, "field name")?;
-        let fty = if fitems.len() == 2 {
-            let (fty_s, _) = atom_sym(&fitems[1])
-                .ok_or_else(|| Diag::new("expected field type").with_span(se_span(&fitems[1])))?;
-            parse_type_from_sym_checked(&fty_s, &fspan)?
-        } else {
-            Ty::Unknown
-        };
-        fields.push(Field {
-            name: fname.clone(),
-            rust_name: rust_value_name(&fname),
-            ty: fty,
-            span: Span {
-                start: fsp.start,
-                end: fspan.end,
-            },
-        });
-    }
+    let fields = parse_decl_fields(items.iter().skip(2), "field")?;
 
     Ok(StructDef {
         name: name.clone(),
@@ -925,36 +897,7 @@ pub fn parse_union(se: &Sexp) -> DslResult<UnionDef> {
         let (vname, vname_sp) = atom_sym(&vitems[0])
             .ok_or_else(|| Diag::new("expected variant name").with_span(se_span(&vitems[0])))?;
         let vname = ensure_lisp_ident(&vname, &vname_sp, "variant name")?;
-        let mut fields = Vec::new();
-        for f in vitems.iter().skip(1) {
-            let (fitems, fspan) = match f {
-                Sexp::List(v, sp) => (v, sp.clone()),
-                _ => return Err(Diag::new("field must be (name Type)").with_span(se_span(f))),
-            };
-            if fitems.is_empty() || fitems.len() > 2 {
-                return Err(Diag::new("field must be (name Type) or (name)").with_span(fspan));
-            }
-            let (fname, fsp) = atom_sym(&fitems[0])
-                .ok_or_else(|| Diag::new("expected field name").with_span(se_span(&fitems[0])))?;
-            let fname = ensure_lisp_ident(&fname, &fsp, "field name")?;
-            let fty = if fitems.len() == 2 {
-                let (fty_s, _) = atom_sym(&fitems[1]).ok_or_else(|| {
-                    Diag::new("expected field type").with_span(se_span(&fitems[1]))
-                })?;
-                parse_type_from_sym_checked(&fty_s, &fspan)?
-            } else {
-                Ty::Unknown
-            };
-            fields.push(Field {
-                name: fname.clone(),
-                rust_name: rust_value_name(&fname),
-                ty: fty,
-                span: Span {
-                    start: fsp.start,
-                    end: fspan.end,
-                },
-            });
-        }
+        let fields = parse_decl_fields(vitems.iter().skip(1), "field")?;
         variants.push(VariantDef {
             name: vname.clone(),
             rust_name: rust_type_name(&vname),
@@ -976,6 +919,136 @@ pub fn parse_union(se: &Sexp) -> DslResult<UnionDef> {
         },
         extern_: false,
     })
+}
+
+fn parse_decl_fields<'a, I>(forms: I, kind: &str) -> DslResult<Vec<Field>>
+where
+    I: Iterator<Item = &'a Sexp>,
+{
+    let mut out = Vec::new();
+    for form in forms {
+        match form {
+            // Legacy style: (name Type) or (name)
+            Sexp::List(items, fspan) => {
+                if items.is_empty() || items.len() > 2 {
+                    return Err(Diag::new(format!(
+                        "{} must be (name Type), (name), [name:type], or [name:type ...]",
+                        kind
+                    ))
+                    .with_span(fspan.clone()));
+                }
+                let (fname, fsp) = atom_sym(&items[0]).ok_or_else(|| {
+                    Diag::new(format!("expected {} name", kind)).with_span(se_span(&items[0]))
+                })?;
+                let fname = ensure_lisp_ident(&fname, &fsp, &format!("{} name", kind))?;
+                let fty = if items.len() == 2 {
+                    let (fty_s, _) = atom_sym(&items[1]).ok_or_else(|| {
+                        Diag::new(format!("expected {} type", kind)).with_span(se_span(&items[1]))
+                    })?;
+                    parse_type_from_sym_checked(&fty_s, fspan)?
+                } else {
+                    Ty::Unknown
+                };
+                out.push(Field {
+                    name: fname.clone(),
+                    rust_name: rust_value_name(&fname),
+                    ty: fty,
+                    span: Span {
+                        start: fsp.start,
+                        end: fspan.end,
+                    },
+                });
+            }
+            // New style:
+            //   [x:type]
+            //   [x:type y:type]
+            //   [x type y type]
+            //   [x type]
+            Sexp::Brack(items, bspan) => {
+                if items.is_empty() {
+                    return Err(Diag::new(format!(
+                        "{} declaration cannot be empty",
+                        kind
+                    ))
+                    .with_span(bspan.clone()));
+                }
+                let mut syms: Vec<(String, Span)> = Vec::new();
+                for it in items {
+                    let (sym, sp) = atom_sym(it).ok_or_else(|| {
+                        Diag::new(format!("{} declaration must use symbols", kind))
+                            .with_span(se_span(it))
+                    })?;
+                    syms.push((sym, sp));
+                }
+                if syms.iter().all(|(s, _)| s.contains(':')) {
+                    for (sym, sp) in syms {
+                        let (name_raw, ty_raw) = sym.split_once(':').ok_or_else(|| {
+                            Diag::new(format!("invalid {} declaration", kind)).with_span(sp.clone())
+                        })?;
+                        if name_raw.is_empty() || ty_raw.is_empty() {
+                            return Err(Diag::new(format!(
+                                "{} declaration must be name:Type",
+                                kind
+                            ))
+                            .with_span(sp.clone()));
+                        }
+                        let name = ensure_lisp_ident(name_raw, &sp, &format!("{} name", kind))?;
+                        let ty = parse_type_from_sym_checked(ty_raw, &sp)?;
+                        out.push(Field {
+                            name: name.clone(),
+                            rust_name: rust_value_name(&name),
+                            ty,
+                            span: sp,
+                        });
+                    }
+                    continue;
+                }
+                if syms.len() == 1 {
+                    let (name_raw, sp) = &syms[0];
+                    let name = ensure_lisp_ident(name_raw, sp, &format!("{} name", kind))?;
+                    out.push(Field {
+                        name: name.clone(),
+                        rust_name: rust_value_name(&name),
+                        ty: Ty::Unknown,
+                        span: sp.clone(),
+                    });
+                    continue;
+                }
+                if syms.len() % 2 != 0 {
+                    return Err(Diag::new(format!(
+                        "{} declarations must be name/type pairs or name:Type",
+                        kind
+                    ))
+                    .with_span(bspan.clone()));
+                }
+                let mut idx = 0usize;
+                while idx < syms.len() {
+                    let (name_raw, nsp) = &syms[idx];
+                    let (ty_raw, tsp) = &syms[idx + 1];
+                    let name = ensure_lisp_ident(name_raw, nsp, &format!("{} name", kind))?;
+                    let ty = parse_type_from_sym_checked(ty_raw, tsp)?;
+                    out.push(Field {
+                        name: name.clone(),
+                        rust_name: rust_value_name(&name),
+                        ty,
+                        span: Span {
+                            start: nsp.start,
+                            end: tsp.end,
+                        },
+                    });
+                    idx += 2;
+                }
+            }
+            _ => {
+                return Err(Diag::new(format!(
+                    "{} must be (name Type), (name), [name:type], or [name:type ...]",
+                    kind
+                ))
+                .with_span(se_span(form)))
+            }
+        }
+    }
+    Ok(out)
 }
 
 pub fn parse_params(se: &Sexp) -> DslResult<Vec<Param>> {
@@ -1424,10 +1497,25 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                         Diag::new("let form is (let [bindings] expr ...)").with_span(op_span)
                     );
                 }
-                let bindings = parse_let_bindings(&items[1])?;
-                let body = parse_body_expr(&items[2..], span)?;
+                let mut all_bindings = Vec::new();
+                let mut body_start = 1usize;
+                while body_start < items.len() {
+                    if matches!(items[body_start], Sexp::Brack(_, _)) {
+                        let mut part = parse_let_bindings(&items[body_start])?;
+                        all_bindings.append(&mut part);
+                        body_start += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if all_bindings.is_empty() || body_start >= items.len() {
+                    return Err(
+                        Diag::new("let form is (let [bindings] expr ...)").with_span(op_span)
+                    );
+                }
+                let body = parse_body_expr(&items[body_start..], span)?;
                 return Ok(Expr::Let {
-                    bindings,
+                    bindings: all_bindings,
                     body: Box::new(body),
                     span: span.clone(),
                 });

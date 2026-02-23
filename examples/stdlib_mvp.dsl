@@ -9,36 +9,36 @@
 (require [darcy.btree-map :as bmap])
 
 (defrecord demo
-  (greeting string)
-  (str-len usize)
-  (str-empty bool)
-  (num i32)
-  (abs i32)
-  (min i32)
-  (len usize)
-  (empty bool)
-  (opt option<i32>)
-  (opt-some bool)
-  (opt-none bool)
-  (opt-unwrap i32)
-  (opt-unwrap-or i32)
-  (res result<i32,string>)
-  (res-ok bool)
-  (res-err bool)
-  (res-unwrap i32)
-  (res-unwrap-or i32)
-  (hmap hash-map<string,i32>)
-  (hmap-len usize)
-  (hmap-contains bool)
-  (hmap-get option<i32>)
-  (hmap-insert hash-map<string,i32>)
-  (hmap-remove hash-map<string,i32>)
-  (bmap btree-map<string,i32>)
-  (bmap-len usize)
-  (bmap-contains bool)
-  (bmap-get option<i32>)
-  (bmap-insert btree-map<string,i32>)
-  (bmap-remove btree-map<string,i32>))
+  [greeting:string]
+  [str-len:usize]
+  [str-empty:bool]
+  [num:i32]
+  [abs:i32]
+  [min:i32]
+  [len:usize]
+  [empty:bool]
+  [opt:option<i32>]
+  [opt-some:bool]
+  [opt-none:bool]
+  [opt-unwrap:i32]
+  [opt-unwrap-or:i32]
+  [res:result<i32,string>]
+  [res-ok:bool]
+  [res-err:bool]
+  [res-unwrap:i32]
+  [res-unwrap-or:i32]
+  [hmap:hash-map<string,i32>]
+  [hmap-len:usize]
+  [hmap-contains:bool]
+  [hmap-get:option<i32>]
+  [hmap-insert:hash-map<string,i32>]
+  [hmap-remove:hash-map<string,i32>]
+  [bmap:btree-map<string,i32>]
+  [bmap-len:usize]
+  [bmap-contains:bool]
+  [bmap-get:option<i32>]
+  [bmap-insert:btree-map<string,i32>]
+  [bmap-remove:btree-map<string,i32>])
 
 (defn main []
   (io/dbg

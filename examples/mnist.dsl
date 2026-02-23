@@ -5,12 +5,12 @@
 (require [darcy.vec :as v])
 
 (defrecord sample
-  (x vec<f64>)
-  (y vec<f64>))
+  [x:vec<f64>]
+  [y:vec<f64>])
 
 (defrecord acc
-  (correct f64)
-  (total f64))
+  [correct:f64]
+  [total:f64])
 
 (defn argmax-score [v:vec<f64>]
   (v/fold (fn [acc:f64 x:f64] (if (darcy.op/gt x acc) x acc)) -1.0 v))

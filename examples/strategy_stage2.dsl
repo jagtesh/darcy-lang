@@ -2,9 +2,9 @@
 ; Note: extern items are not codegen'd; they must exist in the host Rust crate.
  
 (extern "Candle" (defrecord candle
-   (ts i64)
-   (close f64)
-   (volume f64)))
+   [ts:i64]
+   [close:f64]
+   [volume:f64]))
  
 (defenum regime
   (bull)

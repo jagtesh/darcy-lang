@@ -1,12 +1,12 @@
 ; Stage 1: core DSL features (structs, unions, case, vectors, dbg)
 
 (defrecord candle
-  (close f64)
-  (volume f64))
+  [close:f64]
+  [volume:f64])
  
 (defenum signal
-  (buy (strength f64))
-  (sell (strength f64))
+  (buy [strength:f64])
+  (sell [strength:f64])
   (hold))
  
 (defn decision [s:signal]
