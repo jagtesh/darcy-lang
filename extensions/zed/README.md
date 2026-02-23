@@ -7,6 +7,7 @@ Install it in Zed via:
 - Select: `/Volumes/Dev/code/jagtesh/darcy-lang/extensions/zed`
 
 After install, `.dsl` files map to language `Darcy`.
+The current grammar backend is `tree-sitter-scheme`, so extension config uses grammar id `scheme`.
 
 Darcy LSP is configured through workspace settings in `.zed/settings.json`.
 

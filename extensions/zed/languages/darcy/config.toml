@@ -1,5 +1,5 @@
 name = "Darcy"
-grammar = "darcy"
+grammar = "scheme"
 path_suffixes = ["dsl"]
 line_comments = ["; "]
 

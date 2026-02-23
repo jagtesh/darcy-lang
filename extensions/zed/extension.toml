@@ -6,6 +6,6 @@ authors = ["Darcy Contributors"]
 description = "Darcy language support"
 repository = "https://github.com/jagtesh/darcy-lang"
 
-[grammars.darcy]
+[grammars.scheme]
 repository = "https://github.com/6cdh/tree-sitter-scheme"
 rev = "b5c701148501fa056302827442b5b4956f1edc03"
