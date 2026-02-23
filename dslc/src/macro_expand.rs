@@ -26,6 +26,30 @@ const MACRO_PRELUDE: &str = r#"
 
 (defmacro defextern-enum [name rust-name variants]
   `(extern ~rust-name (defenum ~name ~@variants)))
+
+(defmacro -> [x & forms]
+  (if (empty? forms)
+    x
+    (let [f (first forms)
+          r (rest forms)
+          next (if (symbol? f)
+                 (list f x)
+                 (cons (first f) (cons x (rest f))))]
+      (if (empty? r)
+        next
+        (cons '-> (cons next r))))))
+
+(defmacro ->> [x & forms]
+  (if (empty? forms)
+    x
+    (let [f (first forms)
+          r (rest forms)
+          next (if (symbol? f)
+                 (list f x)
+                 (cons (first f) (concat (rest f) (list x))))]
+      (if (empty? r)
+        next
+        (cons '->> (cons next r))))))
 "#;
 
 pub fn expand_program(forms: &[Datum]) -> DslResult<Vec<Datum>> {
@@ -634,6 +658,29 @@ fn eval_list(items: &[Datum], sp: &Span, env: &mut EvalEnv) -> DslResult<Datum> 
                 }
             };
             return Ok(Datum::Int(len as i64, sp.clone()));
+        }
+        "empty?" => {
+            if items.len() != 2 {
+                return Err(Diag::new("empty? expects 1 argument").with_span(sp.clone()));
+            }
+            let val = eval(&items[1], env)?;
+            let is_empty = match val {
+                Datum::List(items, _) | Datum::Vec(items, _) => items.is_empty(),
+                Datum::Map(items, _) => items.is_empty(),
+                Datum::Set(items, _) => items.is_empty(),
+                _ => {
+                    return Err(Diag::new("empty? expects list, vector, map, or set")
+                        .with_span(datum_span(&items[1])))
+                }
+            };
+            return Ok(Datum::Bool(is_empty, sp.clone()));
+        }
+        "symbol?" => {
+            if items.len() != 2 {
+                return Err(Diag::new("symbol? expects 1 argument").with_span(sp.clone()));
+            }
+            let val = eval(&items[1], env)?;
+            return Ok(Datum::Bool(matches!(val, Datum::Symbol(_, _)), sp.clone()));
         }
         "symbol" => {
             if items.len() != 2 {

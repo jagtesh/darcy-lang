@@ -35,3 +35,17 @@ fn metadata_is_ignored() {
     let out = compile(src).expect("compile ok");
     assert!(out.contains("fn main"), "{}", out);
 }
+
+#[test]
+fn thread_first_macro_expands() {
+    let src = "(defn pair [x y] y) (defn main [] (-> 1 (pair 2)))";
+    let out = compile(src).expect("compile ok");
+    assert!(out.contains("(1i64, 2i64)"), "{}", out);
+}
+
+#[test]
+fn thread_last_macro_expands() {
+    let src = "(defn pair [x y] y) (defn main [] (->> 1 (pair 2)))";
+    let out = compile(src).expect("compile ok");
+    assert!(out.contains("(2i64, 1i64)"), "{}", out);
+}
