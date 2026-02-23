@@ -3,6 +3,7 @@
 (number) @number
 (character) @constant.builtin
 (boolean) @constant.builtin
+(keyword) @constant
 (symbol) @variable
 
 (string) @string
