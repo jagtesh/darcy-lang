@@ -33,8 +33,8 @@
         },
         {
           "name": "comment.block.darcy",
-          "begin": "#\\|",
-          "end": "\\|#"
+          "begin": "\\#\\|",
+          "end": "\\|\\#"
         }
       ]
     },
@@ -69,7 +69,7 @@
       "patterns": [
         {
           "name": "keyword.control.darcy",
-          "match": "\\\\b(?:unquote-splicing|syntax-quote|range-incl|defrecord|with-meta|defmacro|continue|defenum|unquote|require|hashset|extern|defin|quote|while|break|range|false|defn|case|cond|when|loop|call|list|true|def|and|for|let|vec|set|nil|or|if|do|fn)\\\\b"
+          "match": "(?:\\\\bunquote\\-splicing\\\\b|\\\\bsyntax\\-quote\\\\b|\\\\brange\\-incl\\\\b|\\\\bdefrecord\\\\b|\\\\bwith\\-meta\\\\b|\\\\bcontinue\\\\b|\\\\bdefmacro\\\\b|\\\\bdefenum\\\\b|\\\\bhashset\\\\b|\\\\brequire\\\\b|\\\\bunquote\\\\b|\\\\bextern\\\\b|\\\\bbreak\\\\b|\\\\bdefin\\\\b|\\\\bfalse\\\\b|\\\\bquote\\\\b|\\\\brange\\\\b|\\\\bwhile\\\\b|\\\\bcall\\\\b|\\\\bcase\\\\b|\\\\bcond\\\\b|\\\\bdefn\\\\b|let!|\\\\blist\\\\b|\\\\bloop\\\\b|\\\\btrue\\\\b|\\\\bwhen\\\\b|\\\\band\\\\b|\\\\bdef\\\\b|\\\\bfor\\\\b|\\\\blet\\\\b|\\\\bnil\\\\b|\\\\bset\\\\b|\\\\bvec\\\\b|\\\\bdo\\\\b|\\\\bfn\\\\b|\\\\bif\\\\b|\\\\bor\\\\b)"
         }
       ]
     },
@@ -77,7 +77,7 @@
       "patterns": [
         {
           "name": "storage.type.darcy",
-          "match": "\\\\b(?:btree-map|hash-map|hashset|string|usize|isize|bool|i32|i64|u32|u64|f32|f64|())\\\\b"
+          "match": "(?:\\\\bbtree\\-map\\\\b|\\\\bhash\\-map\\\\b|\\\\bhashset\\\\b|\\\\bstring\\\\b|\\\\bisize\\\\b|\\\\busize\\\\b|\\\\bbool\\\\b|\\\\bf32\\\\b|\\\\bf64\\\\b|\\\\bi32\\\\b|\\\\bi64\\\\b|\\\\bu32\\\\b|\\\\bu64\\\\b|\\(\\))"
         }
       ]
     },
@@ -85,7 +85,7 @@
       "patterns": [
         {
           "name": "support.function.builtin.darcy",
-          "match": "\\\\b(?:darcy.btree-map\\/is-empty|darcy.btree-map\\/contains|darcy.hash-map\\/is-empty|darcy.hash-map\\/contains|darcy.option\\/unwrap-or|darcy.result\\/unwrap-or|darcy.btree-map\\/insert|darcy.btree-map\\/remove|darcy.string\\/is-empty|darcy.hash-map\\/insert|darcy.hash-map\\/remove|darcy.option\\/is-some|darcy.option\\/is-none|darcy.option\\/unwrap|darcy.result\\/is-err|darcy.result\\/unwrap|darcy.btree-map\\/new|darcy.btree-map\\/len|darcy.btree-map\\/get|darcy.vec\\/is-empty|darcy.string\\/split|darcy.result\\/is-ok|darcy.hash-map\\/new|darcy.hash-map\\/len|darcy.hash-map\\/get|darcy.fmt\\/println|darcy.string\\/trim|darcy.string\\/join|darcy.option\\/some|darcy.option\\/none|darcy.fmt\\/format|darcy.fmt\\/pretty|darcy.math\\/clamp|darcy.string\\/len|darcy.result\\/err|darcy.fmt\\/print|darcy.result\\/ok|darcy.math\\/abs|darcy.math\\/min|darcy.math\\/max|darcy.vec\\/len|darcy.vec\\/get|darcy.vec\\/set|darcy.io\\/dbg)\\\\b"
+          "match": "(?:darcy\\.btree\\-map/contains|darcy\\.btree\\-map/is\\-empty|darcy\\.hash\\-map/contains|darcy\\.hash\\-map/is\\-empty|darcy\\.btree\\-map/insert|darcy\\.btree\\-map/remove|darcy\\.option/unwrap\\-or|darcy\\.result/unwrap\\-or|darcy\\.hash\\-map/insert|darcy\\.hash\\-map/remove|darcy\\.string/is\\-empty|darcy\\.option/is\\-none|darcy\\.option/is\\-some|darcy\\.btree\\-map/get|darcy\\.btree\\-map/len|darcy\\.btree\\-map/new|darcy\\.option/unwrap|darcy\\.result/is\\-err|darcy\\.result/unwrap|darcy\\.hash\\-map/get|darcy\\.hash\\-map/len|darcy\\.hash\\-map/new|darcy\\.result/is\\-ok|darcy\\.string/split|darcy\\.vec/is\\-empty|darcy\\.fmt/println|darcy\\.option/none|darcy\\.option/some|darcy\\.string/join|darcy\\.string/trim|darcy\\.fmt/format|darcy\\.fmt/pretty|darcy\\.math/clamp|darcy\\.result/err|darcy\\.string/len|darcy\\.fmt/print|darcy\\.result/ok|darcy\\.math/abs|darcy\\.math/max|darcy\\.math/min|darcy\\.vec/get|darcy\\.vec/len|darcy\\.vec/set|darcy\\.io/dbg|bit\\-and|println|bit\\-or|format|pretty|clamp|clone|print|\\->>|abs|add|dbg|div|exp|gte|lte|max|min|mod|mul|sub|\\->|eq|gt|lt)"
         }
       ]
     },
@@ -93,7 +93,7 @@
       "patterns": [
         {
           "name": "keyword.operator.darcy",
-          "match": "(?:\\/|+|-|*)"
+          "match": "(?:\\->>|\\->|<=|>=|\\&|\\*|\\+|\\-|/|<|=|>|\\|)"
         }
       ]
     }

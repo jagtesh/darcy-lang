@@ -61,6 +61,27 @@ npm install
   - `darcy.languageServer.path` (default `darcy-lsp`)
   - `darcy.languageServer.args` (default `[]`)
 
+## Syntax Highlighting
+
+TextMate grammars for Zed and VS Code are generated from `extensions/defs.json`:
+
+```bash
+make grammars
+```
+
+To verify they are in sync:
+
+```bash
+make grammars-check
+```
+
+Files:
+- Source-of-truth metadata: `extensions/defs.json`
+- Generator: `extensions/gen_grammars.py`
+- Generated outputs:
+  - `extensions/vscode/syntaxes/darcy.tmLanguage.json`
+  - `extensions/zed/darcy.tmLanguage.json`
+
 ## Language Snapshot
 
 Top-level forms:

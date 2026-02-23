@@ -15,6 +15,10 @@
     "onLanguage:darcy"
   ],
   "main": "./extension.js",
+  "scripts": {
+    "grammar:update": "python3 ../gen_grammars.py",
+    "grammar:check": "python3 ../gen_grammars.py && git diff --exit-code -- syntaxes/darcy.tmLanguage.json ../zed/darcy.tmLanguage.json"
+  },
   "contributes": {
     "configuration": {
       "title": "Darcy",

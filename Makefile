@@ -5,7 +5,7 @@ BENCH_HISTORY ?= bench/history
 BENCH_LABEL ?= main
 BENCH_MAX_PCT ?= 5
 
-.PHONY: bench-typecheck-run bench-check bench-accept vscode-deps vscode-package
+.PHONY: bench-typecheck-run bench-check bench-accept vscode-deps vscode-package grammars grammars-check
 
 bench-typecheck-run:
 	cargo run -p dslc --release --bin bench_typecheck -- --iters $(BENCH_ITERS) --save $(BENCH_CANDIDATE) --save-dir $(BENCH_HISTORY) --label $(BENCH_LABEL)
@@ -21,3 +21,10 @@ vscode-deps:
 
 vscode-package:
 	cd extensions/vscode && npx @vscode/vsce package
+
+grammars:
+	python3 extensions/gen_grammars.py
+
+grammars-check:
+	python3 extensions/gen_grammars.py
+	git diff --exit-code -- extensions/vscode/syntaxes/darcy.tmLanguage.json extensions/zed/darcy.tmLanguage.json
