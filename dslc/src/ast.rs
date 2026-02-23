@@ -489,9 +489,49 @@ fn is_module_path(prefix: &str) -> bool {
     true
 }
 
+fn is_callable_ident(name: &str) -> bool {
+    let mut chars = name.chars();
+    let first = match chars.next() {
+        Some(c) => c,
+        None => return false,
+    };
+    if first.is_ascii_digit() || first == '/' || first == '.' {
+        return false;
+    }
+    if !is_callable_ident_char(first) {
+        return false;
+    }
+    chars.all(is_callable_ident_char)
+}
+
+fn is_callable_ident_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '?' | '!' | '*' | '+' | '=' | '<' | '>' | '$')
+}
+
 fn ensure_qualified_name(name: &str, span: &Span, kind: &str) -> DslResult<String> {
     if let Some((prefix, item)) = name.rsplit_once('/') {
         if prefix.is_empty() || item.is_empty() || !is_module_path(prefix) || !is_lisp_ident(item) {
+            return Err(
+                Diag::new(format!("{} must be a qualified name like mod/name", kind))
+                    .with_span(span.clone()),
+            );
+        }
+        Ok(name.to_string())
+    } else {
+        Err(
+            Diag::new(format!("{} must be a qualified name like mod/name", kind))
+                .with_span(span.clone()),
+        )
+    }
+}
+
+fn ensure_qualified_callable_name(name: &str, span: &Span, kind: &str) -> DslResult<String> {
+    if let Some((prefix, item)) = name.rsplit_once('/') {
+        if prefix.is_empty()
+            || item.is_empty()
+            || !is_module_path(prefix)
+            || !is_callable_ident(item)
+        {
             return Err(
                 Diag::new(format!("{} must be a qualified name like mod/name", kind))
                     .with_span(span.clone()),
@@ -635,10 +675,24 @@ fn ensure_lisp_ident(name: &str, span: &Span, kind: &str) -> DslResult<String> {
     Ok(name.to_string())
 }
 
-fn ensure_lisp_ident_allow_reserved(name: &str, span: &Span, kind: &str) -> DslResult<String> {
-    if !is_lisp_ident(name) {
+fn ensure_callable_ident(name: &str, span: &Span, kind: &str) -> DslResult<String> {
+    if !is_callable_ident(name) {
         return Err(Diag::new(format!(
-            "{} must be lowercase lisp-style (kebab-case)",
+            "{} must use valid callable characters (letters, digits, and -_?!*+=<>$)",
+            kind
+        ))
+        .with_span(span.clone()));
+    }
+    if is_reserved_ident(name) {
+        return Err(Diag::new(format!("'{}' is a reserved keyword", name)).with_span(span.clone()));
+    }
+    Ok(name.to_string())
+}
+
+fn ensure_callable_ident_allow_reserved(name: &str, span: &Span, kind: &str) -> DslResult<String> {
+    if !is_callable_ident(name) {
+        return Err(Diag::new(format!(
+            "{} must use valid callable characters (letters, digits, and -_?!*+=<>$)",
             kind
         ))
         .with_span(span.clone()));
@@ -736,7 +790,32 @@ fn is_reserved_ident(name: &str) -> bool {
 }
 
 fn rust_value_name(name: &str) -> String {
-    name.replace('-', "_")
+    let base = name.rsplit_once('/').map(|(_, tail)| tail).unwrap_or(name);
+    let mut out = String::new();
+    for c in base.chars() {
+        match c {
+            'a'..='z' | 'A'..='Z' | '0'..='9' => out.push(c),
+            '-' | '_' => out.push('_'),
+            '?' => out.push_str("_q"),
+            '!' => out.push_str("_bang"),
+            '*' => out.push_str("_star"),
+            '+' => out.push_str("_plus"),
+            '=' => out.push_str("_eq"),
+            '<' => out.push_str("_lt"),
+            '>' => out.push_str("_gt"),
+            '$' => out.push_str("_dollar"),
+            '&' => out.push_str("_and"),
+            '|' => out.push_str("_or"),
+            _ => out.push('_'),
+        }
+    }
+    if out.is_empty() {
+        out.push('v');
+    }
+    if out.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        out.insert(0, '_');
+    }
+    out
 }
 
 fn rust_type_name(name: &str) -> String {
@@ -1446,9 +1525,9 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
             }
             if !is_builtin_op(&op) {
                 if op.contains('/') {
-                    ensure_qualified_name(&op, &op_span, "call name")?;
+                    ensure_qualified_callable_name(&op, &op_span, "call name")?;
                 } else {
-                    ensure_lisp_ident(&op, &op_span, "call name")?;
+                    ensure_callable_ident(&op, &op_span, "call name")?;
                 }
             }
             let mut args = Vec::new();
@@ -1891,7 +1970,7 @@ pub fn parse_fn(se: &Sexp) -> DslResult<FnDef> {
     };
     let (name, name_sp) = atom_sym(&items[1])
         .ok_or_else(|| Diag::new("expected function name").with_span(se_span(&items[1])))?;
-    let name = ensure_lisp_ident(&name, &name_sp, "function name")?;
+    let name = ensure_callable_ident(&name, &name_sp, "function name")?;
     if name == "main" {
         exported = true;
     }
@@ -1960,7 +2039,7 @@ pub fn parse_inline(se: &Sexp) -> DslResult<InlineDef> {
     }
     let (name, name_sp) = atom_sym(&items[1])
         .ok_or_else(|| Diag::new("expected inline function name").with_span(se_span(&items[1])))?;
-    let name = ensure_lisp_ident(&name, &name_sp, "inline function name")?;
+    let name = ensure_callable_ident(&name, &name_sp, "inline function name")?;
     let params = parse_params(&items[2])?;
     let body = parse_body_expr(&items[3..], &span)?;
     Ok(InlineDef {
@@ -2141,7 +2220,7 @@ fn parse_extern_fn(se: &Sexp, override_name: Option<String>) -> DslResult<Top> {
     }
     let (name, name_sp) = atom_sym(&items[1])
         .ok_or_else(|| Diag::new("expected function name").with_span(se_span(&items[1])))?;
-    let name = ensure_lisp_ident_allow_reserved(&name, &name_sp, "function name")?;
+    let name = ensure_callable_ident_allow_reserved(&name, &name_sp, "function name")?;
     let params = parse_params(&items[2])?;
 
     let (ret_sym, ret_sp) = atom_sym(&items[3]).ok_or_else(|| {

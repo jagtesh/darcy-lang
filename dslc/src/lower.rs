@@ -1792,5 +1792,30 @@ fn ty_rust(ty: &Ty, type_names: &BTreeMap<String, String>) -> String {
 }
 
 fn rust_value_name(name: &str) -> String {
-    name.replace('-', "_")
+    let base = name.rsplit_once('/').map(|(_, tail)| tail).unwrap_or(name);
+    let mut out = String::new();
+    for c in base.chars() {
+        match c {
+            'a'..='z' | 'A'..='Z' | '0'..='9' => out.push(c),
+            '-' | '_' => out.push('_'),
+            '?' => out.push_str("_q"),
+            '!' => out.push_str("_bang"),
+            '*' => out.push_str("_star"),
+            '+' => out.push_str("_plus"),
+            '=' => out.push_str("_eq"),
+            '<' => out.push_str("_lt"),
+            '>' => out.push_str("_gt"),
+            '$' => out.push_str("_dollar"),
+            '&' => out.push_str("_and"),
+            '|' => out.push_str("_or"),
+            _ => out.push('_'),
+        }
+    }
+    if out.is_empty() {
+        out.push('v');
+    }
+    if out.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        out.insert(0, '_');
+    }
+    out
 }

@@ -6,3 +6,10 @@ fn lowers_function_call() {
     let out = compile(src).expect("compile ok");
     assert!(out.contains("total_prices(4i32)"), "{}", out);
 }
+
+#[test]
+fn lowers_predicate_function_call() {
+    let src = "(defn empty? [x] true) (defn main [] (empty? 1))";
+    let out = compile(src).expect("compile ok");
+    assert!(out.contains("empty_q"), "{}", out);
+}

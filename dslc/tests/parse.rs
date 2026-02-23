@@ -123,3 +123,16 @@ fn parses_commas_as_whitespace() {
     let tops = parse_toplevel(&sexps).expect("parse toplevel");
     assert_eq!(tops.len(), 1);
 }
+
+#[test]
+fn parses_predicate_function_name() {
+    let src = "(defn empty? [xs] true) (defn main [] (empty? []))";
+    let toks = lex(src).expect("lex ok");
+    let mut parser = Parser::new(toks);
+    let sexps = parser.parse_all().expect("parse sexps");
+    let tops = parse_toplevel(&sexps).expect("parse toplevel");
+    match &tops[0] {
+        Top::Func(fd) => assert_eq!(fd.name, "empty?"),
+        _ => panic!("expected function"),
+    }
+}
