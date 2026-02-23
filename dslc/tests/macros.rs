@@ -49,3 +49,14 @@ fn thread_last_macro_expands() {
     let out = compile(src).expect("compile ok");
     assert!(out.contains("(2i64, 1i64)"), "{}", out);
 }
+
+#[test]
+fn prelude_print_macros_expand_without_require() {
+    let src = "(defn a [] (println \"x={}\" 1)) (defn b [] (print \"{}\" 2)) (defn c [] (dbg 3)) (defn d [] (format 4)) (defn e [] (pretty 5))";
+    let out = compile(src).expect("compile ok");
+    assert!(out.contains("println!(\"x={}\", 1i64)"), "{}", out);
+    assert!(out.contains("print!(\"{}\", 2i64)"), "{}", out);
+    assert!(out.contains("println!(\"{:?}\", 3i64)"), "{}", out);
+    assert!(out.contains("format!(\"{:?}\", 4i64)"), "{}", out);
+    assert!(out.contains("format!(\"{:#?}\", 5i64)"), "{}", out);
+}

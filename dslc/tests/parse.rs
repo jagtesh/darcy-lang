@@ -1,4 +1,4 @@
-use dslc::{lex, parse_toplevel, Expr, Parser, Top};
+use dslc::{lex, parse_toplevel, Expr, Parser, Top, Ty};
 
 #[test]
 fn parses_struct_and_fn() {
@@ -133,6 +133,36 @@ fn parses_predicate_function_name() {
     let tops = parse_toplevel(&sexps).expect("parse toplevel");
     match &tops[0] {
         Top::Func(fd) => assert_eq!(fd.name, "empty?"),
+        _ => panic!("expected function"),
+    }
+}
+
+#[test]
+fn parses_compiler_type_aliases() {
+    let src = "(defrecord sample [n:int xs:vec<float> label:str]) (defn score [x:float y:uint] (+ x (cast y f64)))";
+    let toks = lex(src).expect("lex ok");
+    let mut parser = Parser::new(toks);
+    let sexps = parser.parse_all().expect("parse sexps");
+    let tops = parse_toplevel(&sexps).expect("parse toplevel");
+
+    match &tops[0] {
+        Top::Struct(sd) => {
+            assert_eq!(sd.fields.len(), 3);
+            assert!(matches!(sd.fields[0].ty, Ty::Named(ref n) if n == "i64"));
+            assert!(matches!(
+                sd.fields[1].ty,
+                Ty::Vec(ref inner) if matches!(inner.as_ref(), Ty::Named(n) if n == "f64")
+            ));
+            assert!(matches!(sd.fields[2].ty, Ty::Named(ref n) if n == "string"));
+        }
+        _ => panic!("expected struct"),
+    }
+    match &tops[1] {
+        Top::Func(fd) => {
+            assert_eq!(fd.params.len(), 2);
+            assert!(matches!(fd.params[0].ann, Some(Ty::Named(ref n)) if n == "f64"));
+            assert!(matches!(fd.params[1].ann, Some(Ty::Named(ref n)) if n == "u64"));
+        }
         _ => panic!("expected function"),
     }
 }

@@ -342,6 +342,7 @@ fn parse_type_from_sym(s: &str) -> Ty {
             .collect();
         return Ty::Union(tys);
     }
+    let s = crate::type_aliases::resolve_type_alias(s);
     if s == "unit" {
         return Ty::Named("()".to_string());
     }

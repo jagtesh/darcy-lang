@@ -50,6 +50,21 @@ const MACRO_PRELUDE: &str = r#"
       (if (empty? r)
         next
         (cons '->> (cons next r))))))
+
+(defmacro println [& args]
+  `(darcy.fmt/println ~@args))
+
+(defmacro print [& args]
+  `(darcy.fmt/print ~@args))
+
+(defmacro dbg [x]
+  `(darcy.io/dbg ~x))
+
+(defmacro format [x]
+  `(darcy.fmt/format ~x))
+
+(defmacro pretty [x]
+  `(darcy.fmt/pretty ~x))
 "#;
 
 pub fn expand_program(forms: &[Datum]) -> DslResult<Vec<Datum>> {

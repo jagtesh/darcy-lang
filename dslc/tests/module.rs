@@ -124,3 +124,13 @@ fn require_multiple_specs() {
         .rust;
     assert!(out.contains("fn main"));
 }
+
+#[test]
+fn prelude_println_macro_available_without_require() {
+    let root = temp_root("prelude_println");
+    let src = "(defn main [] (println \"n={}\" 7))";
+    let out = compile_with_modules(&root.join("main.dsl"), src, &[])
+        .expect("compile ok")
+        .rust;
+    assert!(out.contains("println!(\"n={}\", 7i64)"), "{}", out);
+}
