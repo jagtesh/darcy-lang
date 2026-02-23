@@ -1,75 +1,28 @@
-# lisp2rust MVP
+# Darcy (darcy-lang)
 
-This is a tiny proof-of-concept "Elm-ish typed Lisp" frontend that lowers to Rust.
+Darcy is a small, typed Lisp that compiles to Rust.
 
-What it supports (MVP):
- - `(defrecord name (field type) ...)`
- - `(defn name [params] expr)`
- - `(defmacro name [params] expr)`
- - `(def name expr)`
-   - params are symbols like `o:order` (type annotation required unless inference is unambiguous)
-- Expressions:
-  - numeric literals (ints default to i64, floats to f64)
-  - if: `(if cond then [else])`
-  - when: `(when cond expr ...)`
-  - short-circuit: `(and a b)`, `(or a b)`
-  - sequencing: `(do expr1 expr2 ... exprN)`
-  - local bindings: `(let [x 1 y 2] expr)`
-  - closures: `(fn [x] expr)` and `(call f arg ...)`
-  - loops: `(loop expr)`, `(while cond expr)`, `(for i (range 0 10) expr)`
-  - cond: `(cond (test expr) ... (else expr))`
-  - loop control: `(break [expr])`, `(continue)`
-  - variables
-  - field access sugar: `o.qty`
-  - method calls: `(. obj method arg ...)`, `(.method obj arg ...)`
-  - binary ops: `+ - * /` in prefix form: `(* a b)`
-  - unions + case: `(defenum name (variant (field Type) ...) ...)`, `(case x (variant (field v) expr) (_ expr))`
-  - booleans, nil, and keywords: `true`, `false`, `nil`, `:key`
-  - vectors: `[1 2 3]`, `(vec<i32> 1 2 3)`
-  - type ascription: `(type expr Type)`
-  - list alias: `(list 1 2 3)`
-  - vector index: `(darcy.vec/get v i)`, `(darcy.vec/set v i x)`
-  - vector helpers: `(darcy.vec/new)`, `(darcy.vec/push v x)`, `(darcy.vec/repeat x n)`, `(darcy.vec/map f v)`, `(darcy.vec/map2 f a b)`, `(darcy.vec/fold f init v)`, `(darcy.vec/take v n)`
-  - cloning: `(darcy.core/clone x)`
-  - inferred borrowing: params used only in borrow positions (field access or by-ref calls) lower to `&T`
-  - auto-clone on reuse after move (compiler emits a warning)
-  - map literals: `{:a 1 :b 2}`, `(darcy.hash-map/new [:a 1] [:b 2])`
-  - set literals: `#{1 2 3}`, `(set 1 2 3)`, `(hashset 1 2 3)`
-  - local assignment: `(let! name expr)` returns `()`
-  - debug print: `(darcy.io/dbg expr)`
-  - formatted print: `(darcy.fmt/print (darcy.fmt/format x))`, `(darcy.fmt/println (darcy.fmt/format x))`
-  - math helpers: `(darcy.math/exp x)`, `(darcy.op/gt a b)`, `(darcy.op/lt a b)`, `(darcy.op/eq a b)`
-  - extern wrapper: `(extern (defrecord ...))`, `(extern (defenum ...))`, `(extern (defn name [params] RetType))`
-  - rust interop macros: `(require [darcy.rust :refer [defextern defextern-record]])`
-  - stdlib modules: `darcy.tensor`, `darcy.nn`, `darcy.mnist`
-  - inline expansion: `(defin name [params] expr)`
-  - comments: `; line` and `#| block |#`
-  - reader: commas are whitespace, `#_` discards the next form
-  - quote: `'x` expands to `(quote x)`, `` `x`` expands to `(syntax-quote x)`
-  - unquote: `~x` and `~@x` inside syntax-quote
-  - metadata: `^meta` attaches metadata to the next form (currently ignored in lowering)
-  - modules: `(require [darcy.io])`, `(require [darcy.io :as io])`, `(require [darcy.io :refer [dbg]])`, `(require [darcy.io :refer :all])`
+The compiler (`dslc`) reads `.dsl` files, typechecks them, lowers to Rust, and (optionally) runs the result.
 
-What it does NOT support yet:
-- explicit borrowing/ownership surface syntax
-- full Rust-style borrow checking (current system uses heuristics + auto-clone warnings)
-- explicit user-defined generics / traits (compiler infers generic bounds for unconstrained functions)
-- closures as return types
-- helpful multi-span diagnostics (only 1 span)
+## Quickstart
 
-## Try it
-
-From this folder:
+Compile a single file to Rust:
 
 ```bash
 cargo run -p dslc -- examples/ok.dsl > out.rs
-cat out.rs
 ```
 
-Add a stdlib search path:
+Run a file (compiles and executes):
 
 ```bash
-cargo run -p dslc -- --lib crates/darcy-stdlib/darcy examples/ok.dsl
+cargo run -p dslc -- run examples/ok.dsl
+```
+
+Add stdlib/module search paths (repeatable):
+
+```bash
+cargo run -p dslc -- -L crates/darcy-stdlib/darcy examples/ok.dsl
+cargo run -p dslc -- -L crates/darcy-stdlib/darcy run examples/mnist.dsl --runtime
 ```
 
 Enable the feedback pass (two-stage emit + rustc diagnostics):
@@ -78,15 +31,67 @@ Enable the feedback pass (two-stage emit + rustc diagnostics):
 cargo run -p dslc -- --feedback examples/ok.dsl
 ```
 
-Run with Rust interop (uses `darcy-runtime` automatically when referenced):
-
-```bash
-cargo run -p dslc -- --lib crates/darcy-stdlib/darcy run examples/mnist.dsl --runtime
-```
-
 Note: the compiler may emit warnings when it auto-clones values to avoid move errors.
 
-## Modules quickstart
+## Language Snapshot
+
+Top-level forms:
+- Records: `(defrecord name (field Type) ...)`
+- Enums: `(defenum name (variant (field Type) ...) ...)`
+- Functions: `(defn name [params] expr)`
+- Macros: `(defmacro name [params] expr)`
+- Inline defs: `(defin name [params] expr)` (expanded before typechecking)
+- Values: `(def name expr)`
+
+Expressions (selected):
+- Literals: ints (default `i64`), floats (`f64`), strings, `true`/`false`, `nil` (`()`), keywords (`:key`)
+- Control flow: `(if cond then [else])`, `(when cond expr ...)`, `(cond (test expr) ... (else expr))`
+- Sequencing/binding: `(do ...)`, `(let [x 1 y 2] ...)`, `(let! x expr)` (assignment, returns `()`)
+- Functions: `(fn [x] ...)`, calls: `(f a b)` (plus `(call f a b)` for dynamic calls)
+- Loops: `(loop expr)`, `(while cond expr)`, `(for i (range 0 10) expr)`
+- Loop control: `(break [expr])`, `(continue)`
+- Field access: `u.name`
+- Method calls (Rust interop-ish): `(. obj method arg ...)`, `(.method obj arg ...)`
+- Case on enums: `(case x (variant (field v) expr) (_ expr))`
+- Threading macros: `(-> x (f 1) g)`, `(->> xs (map f) (take 10))`
+- Reader conveniences: `;` line comments, `#| |#` block comments, commas are whitespace, `#_` discards the next form
+
+Interop (selected):
+- Extern wrapper: `(extern (defrecord ...))`, `(extern (defenum ...))`, `(extern (defn name [params] RetType))`
+- Rust interop macros: `(require [darcy.rust :refer [defextern defextern-record]])`
+
+## Prelude, Operators, Overloading
+
+Prelude:
+- `darcy.core` is automatically opened in every module (except `darcy.core` and `darcy.op`).
+- This means `+`, `=`, `mod`, `<`, `<=`, `>`, `>=`, `&`, `|` work as normal calls without an explicit `require`.
+
+Operators:
+- Operator spellings are aliases to `darcy.core/*` names (`+` -> `add`, `=` -> `eq`, etc).
+- `darcy.core/*` is a thin layer over `darcy.op/*`.
+- `darcy.op/*` are compiler-lowered primitives (they become real Rust ops in generated code).
+
+Overloading:
+- Functions can be overloaded by arity (same name, different parameter count).
+
+## Printing And Strings
+
+Printing:
+- Debug print: `(darcy.io/dbg x)` (Rust `println!("{:?}", ...)`)
+- Formatting: `(darcy.fmt/format x)`, `(darcy.fmt/pretty x)`
+- Printing is variadic:
+  - Template-style: `(darcy.fmt/println "x={} y={}" x y)` (lowered to Rust `println!`)
+  - Value-style: `(darcy.fmt/println a b c)` prints values separated by spaces
+
+String interpolation:
+- `${name}` inside a string literal lowers to `format!(...)`.
+- Example: `(darcy.fmt/println "hi ${name}")`
+
+Records/enums printing:
+- All `defrecord` and `defenum` types automatically get a Rust `Display` impl (currently backed by `Debug`),
+  so `(darcy.fmt/println u)` works for user-defined types.
+
+## Modules
 
 ```lisp
 (require [darcy.io :as io])
@@ -95,7 +100,19 @@ Note: the compiler may emit warnings when it auto-clones values to avoid move er
   (io/dbg 42))
 ```
 
-## Cargo-integrated workflow
+You can also:
+- `(require [darcy.io :refer [dbg]])`
+- `(require [darcy.io :refer :all])`
+
+Module paths use `.` (example: `darcy.io`). Callable references use `/` (example: `darcy.io/dbg`).
+
+Stdlib modules (selected):
+- Always available (builtins): `darcy.core`, `darcy.op`, `darcy.io`, `darcy.fmt`, `darcy.option`, `darcy.result`
+- Common library modules (from `crates/darcy-stdlib/darcy/`): `darcy.vec`, `darcy.string`, `darcy.math`, `darcy.tensor`, `darcy.nn`, `darcy.mnist`, `darcy.rand`
+
+## Rust Integration
+
+### Cargo-integrated workflow
 
 Use the Cargo subcommand to scaffold a Rust project with Darcy integration:
 
@@ -105,23 +122,20 @@ cd my-app
 cargo run
 ```
 
-This creates a normal Cargo crate with `build.rs` and a `darcy/` folder. The
-build step compiles Darcy sources into Rust and includes them automatically.
-Darcy's stdlib comes from the `darcy-stdlib` crate by default.
-The template enables the `darcy-compiled` feature by default, which generates
-and re-exports the Darcy module at the crate root.
+This creates a normal Cargo crate with `build.rs` and a `darcy/` folder. The build step compiles Darcy sources
+into Rust and includes them automatically. Darcy's stdlib comes from the `darcy-stdlib` crate by default.
 
-If you're developing from this repo, set `DARCY_SDK` to the repo root so
-`cargo darcy init` uses path dependencies to `darcy-build` and `darcy-stdlib`:
+If you're developing from this repo, set `DARCY_SDK` to the repo root so `cargo darcy init` uses path
+dependencies to `darcy-build` and `darcy-stdlib`:
 
 ```bash
 export DARCY_SDK=/path/to/darcy-lang
 ```
 
-## Calling Darcy from Rust
+### Calling Darcy from Rust
 
-For a standard, automated workflow, use the `darcy-build` crate in `build.rs` so
-Darcy sources are compiled during `cargo build`.
+For an automated workflow, use the `darcy-build` crate in `build.rs` so Darcy sources are compiled during
+`cargo build`.
 
 ```toml
 [build-dependencies]
@@ -153,71 +167,29 @@ fn main() {
 }
 ```
 
-`darcy-build` looks for the stdlib at `DARCY_STDLIB` first, then falls back to the
-repo's `crates/darcy-stdlib/darcy/` directory (when used via the Darcy workspace or a path/git dependency).
+`darcy-build` looks for the stdlib at `DARCY_STDLIB` first, then falls back to this repo's
+`crates/darcy-stdlib/darcy/` directory (when used via the Darcy workspace or a path/git dependency).
 
-If you want one-off compilation, you can still compile a Darcy file to Rust and
-include it as a module:
+## Benchmarks
 
-```bash
-cargo run -p dslc -- examples/ok.dsl > src/darcy_gen.rs
-```
-
-Names are lowered to Rust identifiers (kebab-case -> snake_case, types -> PascalCase).
-Darcy module prefixes are compile-time only; the generated Rust is flat.
-
-## Benchmark harness
-
-There is a small, dependency-free benchmark stub at `dslc/src/bin/bench.rs` that times a
-simple moving-average strategy. To run it:
+There is a small benchmark stub at `dslc/src/bin/bench.rs`:
 
 ```bash
 cargo run -p dslc --bin bench -- --iters 200000
 ```
 
-There is also a typecheck/inference benchmark that reports total and per-iteration time:
+There is also a typecheck/inference benchmark:
 
 ```bash
 cargo run -p dslc --bin bench_typecheck -- --iters 10000 --save bench/typecheck.json
 cargo run -p dslc --release --bin bench_typecheck -- --iters 10000 --save bench/typecheck.release.json
 ```
 
-You can save history, compare, and update baselines:
+## Current Limitations
 
-```bash
-cargo run -p dslc --bin bench_typecheck -- --iters 10000 --save-dir bench/history --label main
-cargo run -p dslc --bin bench_typecheck -- compare --baseline bench/baseline.json --candidate bench/typecheck.release.json --max-regression-pct 5
-cargo run -p dslc --bin bench_typecheck -- update --baseline bench/baseline.json --candidate bench/typecheck.release.json
-```
-
-Makefile workflow (release builds, timestamped history, and regression checks):
-
-```bash
-make bench-check
-make bench-accept
-```
-
-To compare against CEL, enable the `cel` feature. The harness uses the `cel` crate to evaluate a
-simple expression with a custom `last_sma` function.
-
-Try the error cases:
-
-```bash
-cargo run -p dslc -- examples/ambiguous.dsl
-cargo run -p dslc -- examples/missing_field.dsl
-```
-
-## Strategy examples (staged)
-
-- `examples/strategy_stage1.dsl` uses structs, unions, case, vectors, and dbg.
-- `examples/strategy_stage2.dsl` introduces extern types/functions and regime logic.
-- `examples/strategy_stage3.dsl` sketches multi-asset portfolio logic with broadcasting.
-
-## Compiler pipeline
-
-`dslc` emits Rust in two passes when `--feedback` is enabled. The feedback stage runs `cargo check`
-and rust-analyzer diagnostics in parallel on the first Rust output, merges trait-bound hints, and
-re-emits Rust with refined generics.
+- No explicit ownership/borrowing surface syntax yet (there is inferred borrowing + auto-clone warnings)
+- No user-defined traits/generics syntax (compiler infers generic bounds in some cases)
+- Diagnostics are mostly single-span today
 
 ```mermaid
 flowchart TD
@@ -244,7 +216,8 @@ The intent is: your compiler does the "clarity layer" (shape + local type infere
 and Rust remains the final checker for deep lifetime / trait issues.
 
 Naming: DSL identifiers are lowercase kebab-case. They are normalized to Rust identifiers during lowering
-(types and variants become PascalCase; values become snake_case). Use `(extern "RustName" (def...))`
-to override the Rust name for extern declarations.
+(types and variants become PascalCase; values become snake_case). Callable names are a bit more permissive
+(they can include characters like `?` and `!`), and all non-Rust characters are safely mangled during lowering.
+Use `(extern "RustName" (def...))` to override the Rust name for extern declarations.
 
 See `LANGUAGE.md` for the living language guide.
