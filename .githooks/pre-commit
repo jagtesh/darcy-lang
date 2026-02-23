@@ -4,9 +4,16 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+staged_files="$(git diff --cached --name-only --diff-filter=ACMR)"
+
 echo "[pre-commit] running cargo fmt"
 cargo fmt --all
-git add -u
+if [[ -n "${staged_files}" ]]; then
+  while IFS= read -r file; do
+    [[ -z "$file" ]] && continue
+    git add -- "$file"
+  done <<< "${staged_files}"
+fi
 
 echo "[pre-commit] checking generated grammars"
 make grammars-check
