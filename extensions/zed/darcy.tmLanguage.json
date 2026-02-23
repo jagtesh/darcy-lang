@@ -15,6 +15,9 @@
       "include": "#keyword_literals"
     },
     {
+      "include": "#typed_members"
+    },
+    {
       "include": "#keywords"
     },
     {
@@ -73,6 +76,14 @@
         {
           "name": "constant.other.keyword.darcy",
           "match": ":[^\\s\\[\\]{}()\\\";]+"
+        }
+      ]
+    },
+    "typed_members": {
+      "patterns": [
+        {
+          "name": "variable.other.member.darcy",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_?!-]*:[A-Za-z_][A-Za-z0-9_?!-]*\\b"
         }
       ]
     },

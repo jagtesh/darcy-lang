@@ -47,6 +47,7 @@ def build_grammar(defs: dict) -> dict:
             {"include": "#strings"},
             {"include": "#numbers"},
             {"include": "#keyword_literals"},
+            {"include": "#typed_members"},
             {"include": "#keywords"},
             {"include": "#types"},
             {"include": "#builtins"},
@@ -98,6 +99,14 @@ def build_grammar(defs: dict) -> dict:
                     {
                         "name": "constant.other.keyword.darcy",
                         "match": r":[^\s\[\]{}()\";]+",
+                    }
+                ]
+            },
+            "typed_members": {
+                "patterns": [
+                    {
+                        "name": "variable.other.member.darcy",
+                        "match": r"\b[A-Za-z_][A-Za-z0-9_?!-]*:[A-Za-z_][A-Za-z0-9_?!-]*\b",
                     }
                 ]
             },

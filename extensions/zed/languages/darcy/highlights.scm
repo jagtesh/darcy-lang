@@ -8,6 +8,10 @@
 ((symbol) @constant
  (#match? @constant "^:"))
 ((symbol) @variable
+ (#match? @variable "^[^:]+:[^:]+$"))
+((keyword) @variable
+ (#match? @variable "^[^:]+:[^:]+$"))
+((symbol) @variable
  (#match? @variable "^[^:]"))
 
 (string) @string
