@@ -100,7 +100,7 @@ pub enum Expr {
     Str(String, Span),
     Bool(bool, Span),
     Unit(Span),
-    Keyword(String, Span),
+    SymbolLit(String, Span),
     Var(String, Span),
     Ascribe {
         expr: Box<Expr>,
@@ -216,7 +216,7 @@ impl Expr {
             Expr::Str(_, s) => s.clone(),
             Expr::Bool(_, s) => s.clone(),
             Expr::Unit(s) => s.clone(),
-            Expr::Keyword(_, s) => s.clone(),
+            Expr::SymbolLit(_, s) => s.clone(),
             Expr::Var(_, s) => s.clone(),
             Expr::Ascribe { span, .. } => span.clone(),
             Expr::Cast { span, .. } => span.clone(),
@@ -713,14 +713,57 @@ fn ensure_callable_ident_allow_reserved(name: &str, span: &Span, kind: &str) -> 
     Ok(name.to_string())
 }
 
-fn ensure_keyword_ident(name: &str, span: &Span) -> DslResult<String> {
-    if name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '?' || c == '!')
-    {
-        return Ok(name.to_string());
+fn is_symbol_leaf(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '?' || c == '!')
+}
+
+fn parse_symbol_literal(sym: &str, span: &Span) -> DslResult<String> {
+    if let Some(rest) = sym.strip_prefix("::") {
+        if rest.is_empty() {
+            return Err(Diag::new("symbol cannot be empty").with_span(span.clone()));
+        }
+        if let Some((alias, name)) = rest.split_once('/') {
+            if alias.is_empty() || name.is_empty() || name.contains('/') {
+                return Err(
+                    Diag::new("symbol must be ::name or ::alias/name").with_span(span.clone())
+                );
+            }
+            let alias = ensure_lisp_ident(alias, span, "symbol alias")?;
+            if !is_symbol_leaf(name) {
+                return Err(Diag::new("invalid symbol name").with_span(span.clone()));
+            }
+            return Ok(format!("::{}/{}", alias, name));
+        }
+        if rest.contains('/') || !is_symbol_leaf(rest) {
+            return Err(Diag::new("symbol must be ::name or ::alias/name").with_span(span.clone()));
+        }
+        return Ok(format!("::{}", rest));
     }
-    Err(Diag::new("invalid keyword identifier").with_span(span.clone()))
+
+    let rest = sym
+        .strip_prefix(':')
+        .ok_or_else(|| Diag::new("symbol must start with ':'").with_span(span.clone()))?;
+    if rest.is_empty() {
+        return Err(Diag::new("symbol cannot be empty").with_span(span.clone()));
+    }
+    if let Some((ns, name)) = rest.split_once('/') {
+        if ns.is_empty() || name.is_empty() || name.contains('/') || !is_module_path(ns) {
+            return Err(
+                Diag::new("symbol namespace must look like :mod.path/name").with_span(span.clone())
+            );
+        }
+        if !is_symbol_leaf(name) {
+            return Err(Diag::new("invalid symbol name").with_span(span.clone()));
+        }
+        return Ok(format!(":{}/{}", ns, name));
+    }
+    if !is_symbol_leaf(rest) {
+        return Err(Diag::new("invalid symbol name").with_span(span.clone()));
+    }
+    Ok(format!(":{}", rest))
 }
 
 fn ensure_member_ident(name: &str, span: &Span) -> DslResult<String> {
@@ -739,7 +782,8 @@ fn ensure_member_ident(name: &str, span: &Span) -> DslResult<String> {
     }
     if !is_lisp_ident(name) {
         return Err(
-            Diag::new("keyword must be lowercase lisp-style (kebab-case)").with_span(span.clone()),
+            Diag::new("member identifier must be lowercase lisp-style (kebab-case)")
+                .with_span(span.clone()),
         );
     }
     Ok(name.to_string())
@@ -1057,23 +1101,6 @@ pub fn parse_params(se: &Sexp) -> DslResult<Vec<Param>> {
     Ok(out)
 }
 
-fn parse_symbol_ascription(sym: &str, sp: &Span) -> DslResult<Option<Expr>> {
-    let (name, ty) = match sym.split_once(':') {
-        Some(parts) => parts,
-        None => return Ok(None),
-    };
-    if name.is_empty() || ty.is_empty() {
-        return Err(Diag::new("type ascription must be name:Type").with_span(sp.clone()));
-    }
-    let name = ensure_lisp_ident(name, sp, "variable name")?;
-    let ann = parse_type_from_sym_checked(ty, sp)?;
-    Ok(Some(Expr::Ascribe {
-        expr: Box::new(Expr::Var(rust_value_name(&name), sp.clone())),
-        ann,
-        span: sp.clone(),
-    }))
-}
-
 pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
     match se {
         Sexp::Atom(TokKind::Int(v), sp) => Ok(Expr::Int(*v, sp.clone())),
@@ -1082,9 +1109,6 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
         Sexp::Atom(TokKind::Sym(s), sp) if s == "true" => Ok(Expr::Bool(true, sp.clone())),
         Sexp::Atom(TokKind::Sym(s), sp) if s == "false" => Ok(Expr::Bool(false, sp.clone())),
         Sexp::Atom(TokKind::Sym(s), sp) if s == "nil" => Ok(Expr::Unit(sp.clone())),
-        Sexp::Atom(TokKind::Sym(s), sp) if s.starts_with(':') && s.len() > 1 => {
-            Ok(Expr::Keyword(s.clone(), sp.clone()))
-        }
         Sexp::Atom(TokKind::Sym(s), sp) => {
             if s == "true" {
                 return Ok(Expr::Bool(true, sp.clone()));
@@ -1095,15 +1119,15 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
             if s == "nil" {
                 return Ok(Expr::Unit(sp.clone()));
             }
-            if let Some(rest) = s.strip_prefix(':') {
-                if rest.is_empty() {
-                    return Err(Diag::new("keyword cannot be empty").with_span(sp.clone()));
-                }
-                let name = ensure_keyword_ident(rest, sp)?;
-                return Ok(Expr::Keyword(format!(":{}", name), sp.clone()));
+            if s.starts_with(':') {
+                let sym = parse_symbol_literal(s, sp)?;
+                return Ok(Expr::SymbolLit(sym, sp.clone()));
             }
-            if let Some(expr) = parse_symbol_ascription(s, sp)? {
-                return Ok(expr);
+            if s.contains(':') {
+                return Err(Diag::new(
+                    "name:type is only valid in bindings/declarations; use (type expr Type) in expressions",
+                )
+                .with_span(sp.clone()));
             }
             if s.contains('/') {
                 return Err(
@@ -1143,13 +1167,6 @@ pub fn parse_expr(se: &Sexp) -> DslResult<Expr> {
                 return Err(
                     Diag::new("empty list is not a valid expression").with_span(span.clone())
                 );
-            }
-            if items.len() == 1 {
-                if let Some((sym, sym_span)) = atom_sym(&items[0]) {
-                    if let Some(expr) = parse_symbol_ascription(&sym, &sym_span)? {
-                        return Ok(expr);
-                    }
-                }
             }
             let (op, op_span) = match atom_sym(&items[0]) {
                 Some(v) => v,

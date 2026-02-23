@@ -134,3 +134,47 @@ fn prelude_println_macro_available_without_require() {
         .rust;
     assert!(out.contains("println!(\"n={}\", 7i64)"), "{}", out);
 }
+
+#[test]
+fn auto_symbol_resolves_to_current_module() {
+    let root = temp_root("auto_sym_current");
+    let src = "(defn main [] ::a)";
+    let out = compile_with_modules(&root.join("main.dsl"), src, &[])
+        .expect("compile ok")
+        .rust;
+    assert!(
+        out.contains("darcy_stdlib::rt::symbol(\":main/a\")"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn auto_symbol_resolves_alias_namespace() {
+    let root = temp_root("auto_sym_alias");
+    let lib_dir = root.join("lib");
+    fs::create_dir_all(&lib_dir).expect("create lib dir");
+    fs::write(lib_dir.join("math.dsl"), "(defn inc [x:i32] (+ x 1))").expect("write module");
+
+    let src = "(require [math :as m]) (defn main [] ::m/a)";
+    let out = compile_with_modules(&root.join("main.dsl"), src, &[lib_dir])
+        .expect("compile ok")
+        .rust;
+    assert!(
+        out.contains("darcy_stdlib::rt::symbol(\":math/a\")"),
+        "{}",
+        out
+    );
+}
+
+#[test]
+fn auto_symbol_unknown_alias_errors() {
+    let root = temp_root("auto_sym_bad_alias");
+    let src = "(defn main [] ::missing/a)";
+    let err = compile_with_modules(&root.join("main.dsl"), src, &[]).expect_err("expected error");
+    assert!(
+        err.message.contains("unknown module 'missing'"),
+        "{}",
+        err.message
+    );
+}

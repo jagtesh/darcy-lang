@@ -532,8 +532,282 @@ fn resolve_expr(res: &Resolver, e: &Expr) -> DslResult<Expr> {
             field: field.clone(),
             span: span.clone(),
         }),
+        Expr::SymbolLit(sym, span) => Ok(Expr::SymbolLit(
+            resolve_symbol_lit_in_module(res, sym, span)?,
+            span.clone(),
+        )),
         _ => Ok(e.clone()),
     }
+}
+
+fn resolve_symbol_lit_in_module(res: &Resolver, sym: &str, span: &Span) -> DslResult<String> {
+    let Some(rest) = sym.strip_prefix("::") else {
+        return Ok(sym.to_string());
+    };
+    if rest.is_empty() {
+        return Err(Diag::new("symbol cannot be empty").with_span(span.clone()));
+    }
+    if let Some((alias, name)) = rest.split_once('/') {
+        if alias.is_empty() || name.is_empty() || name.contains('/') {
+            return Err(Diag::new("symbol must be ::name or ::alias/name").with_span(span.clone()));
+        }
+        let module = res.resolve_module_prefix(alias, span)?;
+        return Ok(format!(":{}/{}", module, name));
+    }
+    if rest.contains('/') {
+        return Err(Diag::new("symbol must be ::name or ::alias/name").with_span(span.clone()));
+    }
+    Ok(format!(":{}/{}", res.module, rest))
+}
+
+pub fn resolve_auto_symbols_plain(tops: &[Top], module: &str) -> DslResult<Vec<Top>> {
+    let mut out = Vec::with_capacity(tops.len());
+    for top in tops {
+        let mut t = top.clone();
+        match &mut t {
+            Top::Func(fd) => {
+                fd.body = resolve_auto_symbols_expr_plain(&fd.body, module)?;
+            }
+            Top::Def(d) => {
+                d.expr = resolve_auto_symbols_expr_plain(&d.expr, module)?;
+            }
+            _ => {}
+        }
+        out.push(t);
+    }
+    Ok(out)
+}
+
+fn resolve_auto_symbols_expr_plain(e: &Expr, module: &str) -> DslResult<Expr> {
+    Ok(match e {
+        Expr::Int(..)
+        | Expr::Float(..)
+        | Expr::Str(..)
+        | Expr::Bool(..)
+        | Expr::Unit(..)
+        | Expr::Var(..)
+        | Expr::Continue { .. } => e.clone(),
+        Expr::SymbolLit(sym, sp) => {
+            Expr::SymbolLit(resolve_symbol_lit_plain(sym, module, sp)?, sp.clone())
+        }
+        Expr::Ascribe { expr, ann, span } => Expr::Ascribe {
+            expr: Box::new(resolve_auto_symbols_expr_plain(expr, module)?),
+            ann: ann.clone(),
+            span: span.clone(),
+        },
+        Expr::Cast { expr, ann, span } => Expr::Cast {
+            expr: Box::new(resolve_auto_symbols_expr_plain(expr, module)?),
+            ann: ann.clone(),
+            span: span.clone(),
+        },
+        Expr::VecLit { elems, span, ann } => Expr::VecLit {
+            elems: elems
+                .iter()
+                .map(|e| resolve_auto_symbols_expr_plain(e, module))
+                .collect::<DslResult<Vec<_>>>()?,
+            span: span.clone(),
+            ann: ann.clone(),
+        },
+        Expr::SetLit { elems, span, ann } => Expr::SetLit {
+            elems: elems
+                .iter()
+                .map(|e| resolve_auto_symbols_expr_plain(e, module))
+                .collect::<DslResult<Vec<_>>>()?,
+            span: span.clone(),
+            ann: ann.clone(),
+        },
+        Expr::Pair { key, val, span } => Expr::Pair {
+            key: Box::new(resolve_auto_symbols_expr_plain(key, module)?),
+            val: Box::new(resolve_auto_symbols_expr_plain(val, module)?),
+            span: span.clone(),
+        },
+        Expr::Let {
+            bindings,
+            body,
+            span,
+        } => Expr::Let {
+            bindings: bindings
+                .iter()
+                .map(|b| {
+                    Ok(crate::ast::LetBinding {
+                        name: b.name.clone(),
+                        rust_name: b.rust_name.clone(),
+                        ann: b.ann.clone(),
+                        expr: resolve_auto_symbols_expr_plain(&b.expr, module)?,
+                        span: b.span.clone(),
+                    })
+                })
+                .collect::<DslResult<Vec<_>>>()?,
+            body: Box::new(resolve_auto_symbols_expr_plain(body, module)?),
+            span: span.clone(),
+        },
+        Expr::Lambda { params, body, span } => Expr::Lambda {
+            params: params.clone(),
+            body: Box::new(resolve_auto_symbols_expr_plain(body, module)?),
+            span: span.clone(),
+        },
+        Expr::CallDyn { func, args, span } => Expr::CallDyn {
+            func: Box::new(resolve_auto_symbols_expr_plain(func, module)?),
+            args: args
+                .iter()
+                .map(|e| resolve_auto_symbols_expr_plain(e, module))
+                .collect::<DslResult<Vec<_>>>()?,
+            span: span.clone(),
+        },
+        Expr::MethodCall {
+            base,
+            method,
+            args,
+            span,
+        } => Expr::MethodCall {
+            base: Box::new(resolve_auto_symbols_expr_plain(base, module)?),
+            method: method.clone(),
+            args: args
+                .iter()
+                .map(|e| resolve_auto_symbols_expr_plain(e, module))
+                .collect::<DslResult<Vec<_>>>()?,
+            span: span.clone(),
+        },
+        Expr::Do { exprs, span } => Expr::Do {
+            exprs: exprs
+                .iter()
+                .map(|e| resolve_auto_symbols_expr_plain(e, module))
+                .collect::<DslResult<Vec<_>>>()?,
+            span: span.clone(),
+        },
+        Expr::If {
+            cond,
+            then_br,
+            else_br,
+            span,
+        } => Expr::If {
+            cond: Box::new(resolve_auto_symbols_expr_plain(cond, module)?),
+            then_br: Box::new(resolve_auto_symbols_expr_plain(then_br, module)?),
+            else_br: else_br
+                .as_ref()
+                .map(|e| resolve_auto_symbols_expr_plain(e, module).map(Box::new))
+                .transpose()?,
+            span: span.clone(),
+        },
+        Expr::Loop { body, span } => Expr::Loop {
+            body: Box::new(resolve_auto_symbols_expr_plain(body, module)?),
+            span: span.clone(),
+        },
+        Expr::While { cond, body, span } => Expr::While {
+            cond: Box::new(resolve_auto_symbols_expr_plain(cond, module)?),
+            body: Box::new(resolve_auto_symbols_expr_plain(body, module)?),
+            span: span.clone(),
+        },
+        Expr::Set { name, expr, span } => Expr::Set {
+            name: name.clone(),
+            expr: Box::new(resolve_auto_symbols_expr_plain(expr, module)?),
+            span: span.clone(),
+        },
+        Expr::For {
+            var,
+            iter,
+            body,
+            span,
+        } => {
+            let iter = match iter {
+                crate::ast::Iterable::Range(r) => {
+                    crate::ast::Iterable::Range(crate::ast::RangeExpr {
+                        start: Box::new(resolve_auto_symbols_expr_plain(&r.start, module)?),
+                        end: Box::new(resolve_auto_symbols_expr_plain(&r.end, module)?),
+                        step: r
+                            .step
+                            .as_ref()
+                            .map(|s| resolve_auto_symbols_expr_plain(s, module).map(Box::new))
+                            .transpose()?,
+                        inclusive: r.inclusive,
+                        span: r.span.clone(),
+                    })
+                }
+                crate::ast::Iterable::Expr(e) => crate::ast::Iterable::Expr(Box::new(
+                    resolve_auto_symbols_expr_plain(e, module)?,
+                )),
+            };
+            Expr::For {
+                var: var.clone(),
+                iter,
+                body: Box::new(resolve_auto_symbols_expr_plain(body, module)?),
+                span: span.clone(),
+            }
+        }
+        Expr::Break { value, span } => Expr::Break {
+            value: value
+                .as_ref()
+                .map(|e| resolve_auto_symbols_expr_plain(e, module).map(Box::new))
+                .transpose()?,
+            span: span.clone(),
+        },
+        Expr::Field { base, field, span } => Expr::Field {
+            base: Box::new(resolve_auto_symbols_expr_plain(base, module)?),
+            field: field.clone(),
+            span: span.clone(),
+        },
+        Expr::Match {
+            scrutinee,
+            arms,
+            span,
+        } => Expr::Match {
+            scrutinee: Box::new(resolve_auto_symbols_expr_plain(scrutinee, module)?),
+            arms: arms
+                .iter()
+                .map(|arm| {
+                    Ok(MatchArm {
+                        pat: arm.pat.clone(),
+                        body: resolve_auto_symbols_expr_plain(&arm.body, module)?,
+                        span: arm.span.clone(),
+                    })
+                })
+                .collect::<DslResult<Vec<_>>>()?,
+            span: span.clone(),
+        },
+        Expr::Call { op, args, span } => Expr::Call {
+            op: op.clone(),
+            args: args
+                .iter()
+                .map(|e| resolve_auto_symbols_expr_plain(e, module))
+                .collect::<DslResult<Vec<_>>>()?,
+            span: span.clone(),
+        },
+        Expr::MapLit {
+            kind,
+            entries,
+            span,
+            ann,
+        } => Expr::MapLit {
+            kind: *kind,
+            entries: entries
+                .iter()
+                .map(|(k, v)| {
+                    Ok((
+                        resolve_auto_symbols_expr_plain(k, module)?,
+                        resolve_auto_symbols_expr_plain(v, module)?,
+                    ))
+                })
+                .collect::<DslResult<Vec<_>>>()?,
+            span: span.clone(),
+            ann: ann.clone(),
+        },
+    })
+}
+
+fn resolve_symbol_lit_plain(sym: &str, module: &str, span: &Span) -> DslResult<String> {
+    let Some(rest) = sym.strip_prefix("::") else {
+        return Ok(sym.to_string());
+    };
+    if rest.is_empty() {
+        return Err(Diag::new("symbol cannot be empty").with_span(span.clone()));
+    }
+    if rest.contains('/') {
+        return Err(Diag::new(
+            "auto symbols with aliases (::alias/name) require module context (use compile_with_modules)",
+        )
+        .with_span(span.clone()));
+    }
+    Ok(format!(":{}/{}", module, rest))
 }
 
 fn resolve_range(
@@ -652,7 +926,7 @@ fn inline_subst(expr: &Expr, map: &BTreeMap<String, Expr>) -> Expr {
         | Expr::Str(..)
         | Expr::Bool(..)
         | Expr::Unit(..)
-        | Expr::Keyword(..)
+        | Expr::SymbolLit(..)
         | Expr::Continue { .. } => expr.clone(),
         Expr::Pair { key, val, span } => Expr::Pair {
             key: Box::new(inline_subst(key, map)),

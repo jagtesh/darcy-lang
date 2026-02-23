@@ -882,7 +882,7 @@ fn lower_expr(
         },
         Expr::Bool(v, _) => v.to_string(),
         Expr::Unit(_) => "()".to_string(),
-        Expr::Keyword(s, _) => {
+        Expr::SymbolLit(s, _) => {
             let lit = format!("{:?}", s);
             format!("darcy_stdlib::rt::symbol({})", lit)
         }

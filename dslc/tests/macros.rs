@@ -60,3 +60,21 @@ fn prelude_print_macros_expand_without_require() {
     assert!(out.contains("format!(\"{:?}\", 4i64)"), "{}", out);
     assert!(out.contains("format!(\"{:#?}\", 5i64)"), "{}", out);
 }
+
+#[test]
+fn symbol_macro_helper_builds_symbol_literal() {
+    let src = "(defmacro k [] (symbol \":a\")) (defn main [] (k))";
+    let out = compile(src).expect("compile ok");
+    assert!(out.contains("darcy_stdlib::rt::symbol(\":a\")"), "{}", out);
+}
+
+#[test]
+fn keyword_macro_helper_is_not_supported() {
+    let src = "(defmacro k [] (keyword \"a\")) (defn main [] (k))";
+    let err = compile(src).expect_err("expected macro error");
+    assert!(
+        err.message.contains("unknown macro function 'keyword'"),
+        "{}",
+        err.message
+    );
+}

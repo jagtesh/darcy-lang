@@ -300,7 +300,7 @@ fn eval(form: &Datum, env: &mut EvalEnv) -> DslResult<Datum> {
         | Datum::Int(..)
         | Datum::Float(..)
         | Datum::Bool(..)
-        | Datum::Keyword(..)
+        | Datum::SymbolLit(..)
         | Datum::Nil(..) => Ok(form.clone()),
     }
 }
@@ -695,7 +695,10 @@ fn eval_list(items: &[Datum], sp: &Span, env: &mut EvalEnv) -> DslResult<Datum> 
                 return Err(Diag::new("symbol? expects 1 argument").with_span(sp.clone()));
             }
             let val = eval(&items[1], env)?;
-            return Ok(Datum::Bool(matches!(val, Datum::Symbol(_, _)), sp.clone()));
+            return Ok(Datum::Bool(
+                matches!(val, Datum::Symbol(_, _) | Datum::SymbolLit(_, _)),
+                sp.clone(),
+            ));
         }
         "symbol" => {
             if items.len() != 2 {
@@ -705,28 +708,16 @@ fn eval_list(items: &[Datum], sp: &Span, env: &mut EvalEnv) -> DslResult<Datum> 
             let name = match val {
                 Datum::Str(s, _) => s,
                 Datum::Symbol(s, _) => s,
+                Datum::SymbolLit(s, _) => s,
                 _ => {
                     return Err(Diag::new("symbol expects string or symbol")
                         .with_span(datum_span(&items[1])))
                 }
             };
-            return Ok(Datum::Symbol(name, sp.clone()));
-        }
-        "keyword" => {
-            if items.len() != 2 {
-                return Err(Diag::new("keyword expects 1 argument").with_span(sp.clone()));
+            if name.starts_with(':') {
+                return Ok(Datum::SymbolLit(name, sp.clone()));
             }
-            let val = eval(&items[1], env)?;
-            let name = match val {
-                Datum::Str(s, _) => s,
-                Datum::Symbol(s, _) => s,
-                Datum::Keyword(s, _) => s,
-                _ => {
-                    return Err(Diag::new("keyword expects string or symbol")
-                        .with_span(datum_span(&items[1])))
-                }
-            };
-            return Ok(Datum::Keyword(name, sp.clone()));
+            return Ok(Datum::Symbol(name, sp.clone()));
         }
         _ => {}
     }
@@ -870,7 +861,7 @@ fn syntax_quote(form: &Datum, env: &mut EvalEnv, state: &mut GensymState) -> Dsl
             }
             Ok(Datum::Symbol(name.clone(), sp.clone()))
         }
-        Datum::Keyword(..)
+        Datum::SymbolLit(..)
         | Datum::Str(..)
         | Datum::Int(..)
         | Datum::Float(..)

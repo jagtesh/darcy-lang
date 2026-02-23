@@ -109,8 +109,8 @@ impl Reader {
                     if s == "nil" {
                         return Ok(Datum::Nil(t.span));
                     }
-                    if let Some(rest) = s.strip_prefix(':') {
-                        return Ok(Datum::Keyword(rest.to_string(), t.span));
+                    if s.starts_with(':') {
+                        return Ok(Datum::SymbolLit(s.clone(), t.span));
                     }
                     return Ok(Datum::Symbol(s.clone(), t.span));
                 }
@@ -226,7 +226,7 @@ fn datum_span(d: &Datum) -> Span {
         | Datum::Set(_, sp)
         | Datum::Meta { span: sp, .. }
         | Datum::Symbol(_, sp)
-        | Datum::Keyword(_, sp)
+        | Datum::SymbolLit(_, sp)
         | Datum::Str(_, sp)
         | Datum::Int(_, sp)
         | Datum::Float(_, sp)

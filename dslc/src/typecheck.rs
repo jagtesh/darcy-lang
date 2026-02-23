@@ -1365,7 +1365,7 @@ fn rewrite_calls_for_specialization(
         | Expr::Str(..)
         | Expr::Bool(..)
         | Expr::Unit(..)
-        | Expr::Keyword(..)
+        | Expr::SymbolLit(..)
         | Expr::Continue { .. } => {}
     }
 }
@@ -1838,7 +1838,7 @@ fn analyze_moves_expr(
         | Expr::Str(..)
         | Expr::Bool(..)
         | Expr::Unit(..)
-        | Expr::Keyword(..)
+        | Expr::SymbolLit(..)
         | Expr::Continue { .. } => {}
     }
 }
@@ -2063,7 +2063,7 @@ fn count_consumed_uses(
         | Expr::Str(..)
         | Expr::Bool(..)
         | Expr::Unit(..)
-        | Expr::Keyword(..)
+        | Expr::SymbolLit(..)
         | Expr::Continue { .. } => {}
     }
 }
@@ -2214,7 +2214,7 @@ fn param_consumption_visit(
         | Expr::Str(..)
         | Expr::Bool(..)
         | Expr::Unit(..)
-        | Expr::Keyword(..)
+        | Expr::SymbolLit(..)
         | Expr::Continue { .. } => {}
     }
 }
@@ -2527,7 +2527,7 @@ fn collect_inline_deps(
         | Expr::Str(..)
         | Expr::Bool(..)
         | Expr::Unit(..)
-        | Expr::Keyword(..)
+        | Expr::SymbolLit(..)
         | Expr::Var(..)
         | Expr::Continue { .. } => {}
     }
@@ -2781,7 +2781,7 @@ fn expand_inline_calls(
         | Expr::Str(..)
         | Expr::Bool(..)
         | Expr::Unit(..)
-        | Expr::Keyword(..)
+        | Expr::SymbolLit(..)
         | Expr::Var(..)
         | Expr::Continue { .. } => Ok(expr.clone()),
     }
@@ -2805,7 +2805,7 @@ fn inline_subst_local(expr: &Expr, map: &BTreeMap<String, Expr>) -> Expr {
         | Expr::Str(..)
         | Expr::Bool(..)
         | Expr::Unit(..)
-        | Expr::Keyword(..)
+        | Expr::SymbolLit(..)
         | Expr::Continue { .. } => expr.clone(),
         Expr::Pair { key, val, span } => Expr::Pair {
             key: Box::new(inline_subst_local(key, map)),
@@ -3269,7 +3269,7 @@ fn collect_bounds_expr(
         | Expr::Str(..)
         | Expr::Bool(..)
         | Expr::Unit(..)
-        | Expr::Keyword(..)
+        | Expr::SymbolLit(..)
         | Expr::Continue { .. }
         | Expr::Field { .. } => {}
     }
@@ -3376,7 +3376,7 @@ fn collect_mutated_vars(expr: &Expr, out: &mut BTreeSet<String>) {
         | Expr::Str(..)
         | Expr::Bool(..)
         | Expr::Unit(..)
-        | Expr::Keyword(..)
+        | Expr::SymbolLit(..)
         | Expr::Continue { .. } => {}
     }
 }
@@ -3889,7 +3889,7 @@ fn infer_expr_type_internal(
                 types,
             })
         }
-        Expr::Keyword(_, sp) => {
+        Expr::SymbolLit(_, sp) => {
             let ty = InferTy::Named("symbol".to_string());
             let mut types = BTreeMap::new();
             types.insert(SpanKey::new(sp), ty.clone());

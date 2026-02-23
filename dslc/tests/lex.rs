@@ -67,6 +67,26 @@ fn lexes_sets() {
 }
 
 #[test]
+fn lexes_namespaced_and_auto_symbols() {
+    let src = "{:a 1 :foo.bar/a 2 ::a 3 ::m/a 4}";
+    let toks = lex(src).expect("lex ok");
+    let kinds: Vec<TokKind> = toks.into_iter().map(|t| t.kind).collect();
+    let expected = vec![
+        TokKind::LBrace,
+        TokKind::Sym(":a".to_string()),
+        TokKind::Int(1),
+        TokKind::Sym(":foo.bar/a".to_string()),
+        TokKind::Int(2),
+        TokKind::Sym("::a".to_string()),
+        TokKind::Int(3),
+        TokKind::Sym("::m/a".to_string()),
+        TokKind::Int(4),
+        TokKind::RBrace,
+    ];
+    assert_eq!(kinds, expected);
+}
+
+#[test]
 fn lexes_reader_macros() {
     let src = "`(list ~a ~@b) ^:meta x";
     let toks = lex(src).expect("lex ok");

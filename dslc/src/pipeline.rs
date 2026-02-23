@@ -20,6 +20,7 @@ pub fn analyze(src: &str) -> DslResult<PipelineOutput> {
     let expanded = expand_program(&forms)?;
     let sexps = datums_to_sexps(&expanded);
     let tops = parse_toplevel(&sexps)?;
+    let tops = crate::module::resolve_auto_symbols_plain(&tops, "user")?;
     let tops = expand_inline_tops(&tops)?;
     let typechecked = typecheck_tops(&tops)?;
     Ok(PipelineOutput { tops, typechecked })

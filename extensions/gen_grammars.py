@@ -46,7 +46,7 @@ def build_grammar(defs: dict) -> dict:
             {"include": "#comments"},
             {"include": "#strings"},
             {"include": "#numbers"},
-            {"include": "#keyword_literals"},
+            {"include": "#symbol_literals"},
             {"include": "#typed_members"},
             {"include": "#keywords"},
             {"include": "#types"},
@@ -94,11 +94,11 @@ def build_grammar(defs: dict) -> dict:
                     },
                 ]
             },
-            "keyword_literals": {
+            "symbol_literals": {
                 "patterns": [
                     {
-                        "name": "constant.other.keyword.darcy",
-                        "match": r":[^\s\[\]{}()\";]+",
+                        "name": "constant.other.symbol.darcy",
+                        "match": r"(?:(?<=^)|(?<=[\s\[\]{}(),]))::?[^\s\[\]{}()\",;]+",
                     }
                 ]
             },

@@ -80,3 +80,15 @@ fn rejects_shadowing_def_name() {
         err.message
     );
 }
+
+#[test]
+fn rejects_auto_symbol_alias_without_module_context() {
+    let src = "(defn main [] ::m/a)";
+    let err = compile(src).expect_err("expected error");
+    assert!(
+        err.message.contains("require module context")
+            || err.message.contains("compile_with_modules"),
+        "unexpected error: {}",
+        err.message
+    );
+}

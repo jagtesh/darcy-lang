@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use dslc::{lex, Tok, TokKind};
-use dslc::{read_expand_toplevel, typecheck_tops};
 use dslc::{Diag, Span};
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::Result;
@@ -134,7 +133,7 @@ impl LanguageServer for Backend {
             hover_provider: Some(HoverProviderCapability::Simple(true)),
             completion_provider: Some(CompletionOptions {
                 resolve_provider: Some(false),
-                trigger_characters: Some(vec!["/".to_string(), "-".to_string()]),
+                trigger_characters: Some(vec!["/".to_string(), "-".to_string(), ":".to_string()]),
                 ..CompletionOptions::default()
             }),
             definition_provider: Some(OneOf::Left(true)),
@@ -285,11 +284,10 @@ struct Analysis {
 
 fn analyze(text: &str) -> std::result::Result<Analysis, Diag> {
     let tokens = lex(text)?;
-    let tops = read_expand_toplevel(text)?;
-    let typechecked = typecheck_tops(&tops)?;
+    let pipeline = dslc::analyze(text)?;
     Ok(Analysis {
-        tops,
-        typechecked,
+        tops: pipeline.tops,
+        typechecked: pipeline.typechecked,
         tokens,
     })
 }

@@ -12,7 +12,7 @@
       "include": "#numbers"
     },
     {
-      "include": "#keyword_literals"
+      "include": "#symbol_literals"
     },
     {
       "include": "#typed_members"
@@ -71,11 +71,11 @@
         }
       ]
     },
-    "keyword_literals": {
+    "symbol_literals": {
       "patterns": [
         {
-          "name": "constant.other.keyword.darcy",
-          "match": ":[^\\s\\[\\]{}()\\\";]+"
+          "name": "constant.other.symbol.darcy",
+          "match": "(?:(?<=^)|(?<=[\\s\\[\\]{}(),]))::?[^\\s\\[\\]{}()\\\",;]+"
         }
       ]
     },

@@ -14,7 +14,7 @@ pub enum Datum {
         span: Span,
     },
     Symbol(String, Span),
-    Keyword(String, Span),
+    SymbolLit(String, Span),
     Str(String, Span),
     Int(i64, Span),
     Float(f64, Span),
@@ -30,7 +30,7 @@ pub fn datum_span(d: &Datum) -> Span {
         | Datum::Set(_, sp)
         | Datum::Meta { span: sp, .. }
         | Datum::Symbol(_, sp)
-        | Datum::Keyword(_, sp)
+        | Datum::SymbolLit(_, sp)
         | Datum::Str(_, sp)
         | Datum::Int(_, sp)
         | Datum::Float(_, sp)
@@ -54,11 +54,7 @@ pub fn datum_to_sexp(d: &Datum) -> Sexp {
         Datum::Set(items, sp) => Sexp::Set(items.iter().map(datum_to_sexp).collect(), sp.clone()),
         Datum::Meta { form, .. } => datum_to_sexp(form),
         Datum::Symbol(s, sp) => Sexp::Atom(TokKind::Sym(s.clone()), sp.clone()),
-        Datum::Keyword(s, sp) => {
-            let mut sym = String::from(":");
-            sym.push_str(s);
-            Sexp::Atom(TokKind::Sym(sym), sp.clone())
-        }
+        Datum::SymbolLit(s, sp) => Sexp::Atom(TokKind::Sym(s.clone()), sp.clone()),
         Datum::Str(s, sp) => Sexp::Atom(TokKind::Str(s.clone()), sp.clone()),
         Datum::Int(v, sp) => Sexp::Atom(TokKind::Int(*v), sp.clone()),
         Datum::Float(v, sp) => Sexp::Atom(TokKind::Float(*v), sp.clone()),
