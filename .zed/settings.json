@@ -4,11 +4,5 @@
       "command": "/Users/jagtesh/.cargo/bin/darcy-lsp",
       "args": []
     }
-  },
-  "languages": [
-    {
-      "name": "Darcy",
-      "language_servers": ["darcy-lsp"]
-    }
-  ]
+  }
 }
