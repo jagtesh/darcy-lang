@@ -16,7 +16,8 @@
 
 (list
   .
-  (symbol) @function)
+  (symbol) @function
+  (#match? @function "^[^:]"))
 
 ((symbol) @operator
  (#match? @operator "^(\\+|-|\\*|/|=|>|<|>=|<=|mod|&|\\||->|->>)$"))
