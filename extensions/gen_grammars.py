@@ -97,7 +97,7 @@ def build_grammar(defs: dict) -> dict:
                 "patterns": [
                     {
                         "name": "constant.other.keyword.darcy",
-                        "match": r":[A-Za-z0-9_?!-]+",
+                        "match": r":[^\s\[\]{}()\";]+",
                     }
                 ]
             },

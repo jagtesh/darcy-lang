@@ -4,6 +4,8 @@
 (character) @constant.builtin
 (boolean) @constant.builtin
 (keyword) @constant
+((symbol) @constant
+ (#match? @constant "^:"))
 (symbol) @variable
 
 (string) @string
