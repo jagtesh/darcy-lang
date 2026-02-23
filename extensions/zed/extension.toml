@@ -10,13 +10,17 @@ icon_themes = []
 languages = ["languages/darcy"]
 capabilities = []
 
+[lib]
+kind = "Rust"
+version = "0.7.0"
+
 [grammars.scheme]
 repository = "https://github.com/6cdh/tree-sitter-scheme"
 rev = "b5c701148501fa056302827442b5b4956f1edc03"
 
 [language_servers.darcy-lsp]
 language = "Darcy"
-languages = []
+languages = ["Darcy"]
 
 [language_servers.darcy-lsp.language_ids]
 Darcy = "darcy"
