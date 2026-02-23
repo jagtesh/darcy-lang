@@ -1947,27 +1947,41 @@ fn parse_match(span: &Span, items: &[Sexp]) -> DslResult<Expr> {
         while idx + 1 < aitems.len() {
             if let Sexp::List(bind, _bspan) = &aitems[idx] {
                 if bind.len() == 2 {
-                    if let Some((field, fsp)) = atom_sym(&bind[0]) {
-                        if let Some((name, nsp)) = atom_sym(&bind[1]) {
-                            let field = ensure_lisp_ident(&field, &fsp, "field name")?;
-                            let name = if name == "_" {
-                                "_".to_string()
-                            } else {
-                                let n = ensure_lisp_ident(&name, &nsp, "binding name")?;
-                                rust_value_name(&n)
-                            };
-                            bindings.push((
-                                field,
-                                name,
-                                Span {
-                                    start: fsp.start,
-                                    end: nsp.end,
-                                },
-                            ));
-                            idx += 1;
-                            continue;
-                        }
-                    }
+                    let (field, fsp) = atom_sym(&bind[0]).ok_or_else(|| {
+                        Diag::new(
+                            "case variant binding must be (field name), e.g. (triangle (base b) (height h) body)",
+                        )
+                        .with_span(se_span(&bind[0]))
+                    })?;
+                    let (name, nsp) = atom_sym(&bind[1]).ok_or_else(|| {
+                        Diag::new(
+                            "case variant binding must be (field name), e.g. (triangle (base b) (height h) body)",
+                        )
+                        .with_span(se_span(&bind[1]))
+                    })?;
+                    let field = ensure_lisp_ident(&field, &fsp, "field name")?;
+                    let name = if name == "_" {
+                        "_".to_string()
+                    } else {
+                        let n = ensure_lisp_ident(&name, &nsp, "binding name")?;
+                        rust_value_name(&n)
+                    };
+                    bindings.push((
+                        field,
+                        name,
+                        Span {
+                            start: fsp.start,
+                            end: nsp.end,
+                        },
+                    ));
+                    idx += 1;
+                    continue;
+                }
+                if looks_like_grouped_case_bindings(bind) {
+                    return Err(Diag::new(
+                        "case variant bindings must be separate pairs: use (triangle (base b) (height h) body), not (triangle (base b height h) body)",
+                    )
+                    .with_span(se_span(&aitems[idx])));
                 }
                 break;
             } else {
@@ -1998,6 +2012,21 @@ fn parse_match(span: &Span, items: &[Sexp]) -> DslResult<Expr> {
         arms,
         span: span.clone(),
     })
+}
+
+fn looks_like_grouped_case_bindings(bind: &[Sexp]) -> bool {
+    if bind.len() < 4 || bind.len() % 2 != 0 {
+        return false;
+    }
+    for item in bind {
+        let Some((name, _)) = atom_sym(item) else {
+            return false;
+        };
+        if name != "_" && !is_lisp_ident(&name) {
+            return false;
+        }
+    }
+    true
 }
 
 fn parse_cond(span: &Span, items: &[Sexp]) -> DslResult<Expr> {

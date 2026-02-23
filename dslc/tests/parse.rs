@@ -120,6 +120,25 @@ fn parses_case_alias() {
 }
 
 #[test]
+fn rejects_grouped_case_bindings_with_helpful_message() {
+    let src = "(defenum shape (triangle [base height])) (defn shape-name [s] (case s (triangle (base b height h) \"triangle\")))";
+    let toks = lex(src).expect("lex ok");
+    let mut parser = Parser::new(toks);
+    let sexps = parser.parse_all().expect("parse sexps");
+    let err = parse_toplevel(&sexps).expect_err("expected error");
+    assert!(
+        err.message.contains("separate pairs"),
+        "unexpected error: {}",
+        err.message
+    );
+    assert!(
+        err.message.contains("(base b) (height h)"),
+        "unexpected error: {}",
+        err.message
+    );
+}
+
+#[test]
 fn parses_cond_and_set_literals() {
     let src = "(defn demo [x:i32] (cond (true (hashset 1 2)) (else #{3 4})))";
     let toks = lex(src).expect("lex ok");
