@@ -71,7 +71,7 @@
     "keyword_literals": {
       "patterns": [
         {
-          "name": "keyword.other.darcy",
+          "name": "variable.other.property.darcy",
           "match": ":[^\\s\\[\\]{}()\\\";]+"
         }
       ]

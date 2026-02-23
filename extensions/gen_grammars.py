@@ -96,7 +96,7 @@ def build_grammar(defs: dict) -> dict:
             "keyword_literals": {
                 "patterns": [
                     {
-                        "name": "keyword.other.darcy",
+                        "name": "variable.other.property.darcy",
                         "match": r":[^\s\[\]{}()\";]+",
                     }
                 ]

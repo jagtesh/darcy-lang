@@ -3,9 +3,10 @@
 (number) @number
 (character) @constant.builtin
 (boolean) @constant.builtin
-(keyword) @keyword
-((symbol) @keyword
- (#match? @keyword "^:"))
+((keyword) @property
+ (#match? @property "^:"))
+((symbol) @property
+ (#match? @property "^:"))
 ((symbol) @variable
  (#match? @variable "^[^:]"))
 
