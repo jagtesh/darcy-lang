@@ -759,7 +759,12 @@ pub fn typecheck_tops(tops: &[Top]) -> DslResult<TypecheckedProgram> {
                 } else {
                     ctx.fresh_var()
                 };
-                global_defs.insert(d.name.clone(), ty);
+                global_defs.insert(d.name.clone(), ty.clone());
+                // In single-file mode, Expr::Var is rust-normalized (e.g. const-pi -> const_pi).
+                // Keep an alias key so defs remain reachable without module qualification.
+                if !d.name.contains('/') && d.rust_name != d.name {
+                    global_defs.insert(d.rust_name.clone(), ty);
+                }
             }
             _ => {}
         }

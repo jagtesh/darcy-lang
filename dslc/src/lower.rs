@@ -98,6 +98,9 @@ pub fn lower_program(pipeline: &PipelineOutput) -> DslResult<String> {
         }
         if let Top::Def(d) = t {
             def_names.insert(d.name.clone(), d.rust_name.clone());
+            if !d.name.contains('/') && d.rust_name != d.name {
+                def_names.insert(d.rust_name.clone(), d.rust_name.clone());
+            }
         }
     }
 

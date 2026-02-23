@@ -1467,8 +1467,8 @@ impl Resolver {
     }
 
     fn resolve_def_name(&self, name: &str, _span: &Span) -> Option<String> {
-        if self.defs.values.contains(name) {
-            return Some(qualify(&self.module, name));
+        if let Some(found) = find_matching_value_name(&self.defs.values, name) {
+            return Some(qualify(&self.module, found));
         }
         self.resolve_def_from_uses(name)
     }
@@ -1477,13 +1477,15 @@ impl Resolver {
         for u in &self.uses {
             let mod_name = module_name_from_import(&u.path).ok()?;
             let defs = self.all.get(&mod_name)?;
-            if u.open && defs.values.contains(name) {
-                return Some(qualify(&mod_name, name));
+            if u.open {
+                if let Some(found) = find_matching_value_name(&defs.values, name) {
+                    return Some(qualify(&mod_name, found));
+                }
             }
             if let Some(only) = &u.only {
-                if only.contains(&name.to_string()) {
-                    if defs.values.contains(name) {
-                        return Some(qualify(&mod_name, name));
+                if only_allows_value_name(only, name) {
+                    if let Some(found) = find_matching_value_name(&defs.values, name) {
+                        return Some(qualify(&mod_name, found));
                     }
                 }
             }
@@ -1528,6 +1530,56 @@ fn split_qualified(name: &str) -> Option<(&str, &str)> {
         return None;
     }
     Some((prefix, item))
+}
+
+fn find_matching_value_name<'a>(values: &'a BTreeSet<String>, lookup: &str) -> Option<&'a str> {
+    values.iter().find_map(|name| {
+        if value_name_matches(name, lookup) {
+            Some(name.as_str())
+        } else {
+            None
+        }
+    })
+}
+
+fn only_allows_value_name(only: &[String], lookup: &str) -> bool {
+    only.iter().any(|item| value_name_matches(item, lookup))
+}
+
+fn value_name_matches(defined: &str, lookup: &str) -> bool {
+    if defined == lookup {
+        return true;
+    }
+    rust_value_name(defined) == lookup
+}
+
+fn rust_value_name(name: &str) -> String {
+    let base = name.rsplit_once('/').map(|(_, tail)| tail).unwrap_or(name);
+    let mut out = String::new();
+    for c in base.chars() {
+        match c {
+            'a'..='z' | 'A'..='Z' | '0'..='9' => out.push(c),
+            '-' | '_' => out.push('_'),
+            '?' => out.push_str("_q"),
+            '!' => out.push_str("_bang"),
+            '*' => out.push_str("_star"),
+            '+' => out.push_str("_plus"),
+            '=' => out.push_str("_eq"),
+            '<' => out.push_str("_lt"),
+            '>' => out.push_str("_gt"),
+            '$' => out.push_str("_dollar"),
+            '&' => out.push_str("_and"),
+            '|' => out.push_str("_or"),
+            _ => out.push('_'),
+        }
+    }
+    if out.is_empty() {
+        out.push('v');
+    }
+    if out.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        out.insert(0, '_');
+    }
+    out
 }
 
 fn is_builtin_op(name: &str) -> bool {

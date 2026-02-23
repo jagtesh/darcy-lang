@@ -210,6 +210,20 @@ fn parses_predicate_function_name() {
 }
 
 #[test]
+fn allows_non_kebab_binding_and_def_names() {
+    let src = "(def PI 3.14159) (defn main [X_val] PI)";
+    let toks = lex(src).expect("lex ok");
+    let mut parser = Parser::new(toks);
+    let sexps = parser.parse_all().expect("parse sexps");
+    let tops = parse_toplevel(&sexps).expect("parse toplevel");
+    assert_eq!(tops.len(), 2);
+    match &tops[0] {
+        Top::Def(d) => assert_eq!(d.name, "PI"),
+        _ => panic!("expected def"),
+    }
+}
+
+#[test]
 fn parses_compiler_type_aliases() {
     let src = "(defrecord sample [n:int xs:vec<float> label:str]) (defn score [x:float y:uint] (+ x (cast y f64)))";
     let toks = lex(src).expect("lex ok");

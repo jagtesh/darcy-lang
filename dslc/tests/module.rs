@@ -63,6 +63,20 @@ fn use_only_imports_selected() {
 }
 
 #[test]
+fn use_only_imports_kebab_case_defs() {
+    let root = temp_root("only_kebab_def");
+    let lib_dir = root.join("lib");
+    fs::create_dir_all(&lib_dir).expect("create lib dir");
+    fs::write(lib_dir.join("math.dsl"), "(def const-pi 3.14159)").expect("write module");
+
+    let src = "(require [math :refer [const-pi]]) (defn main [] const-pi)";
+    let out = compile_with_modules(&root.join("main.dsl"), src, &[lib_dir])
+        .expect("compile ok")
+        .rust;
+    assert!(out.contains("fn main"), "{}", out);
+}
+
+#[test]
 fn use_only_rejects_missing_names() {
     let root = temp_root("only_err");
     let lib_dir = root.join("lib");

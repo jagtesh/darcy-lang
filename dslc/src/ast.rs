@@ -675,9 +675,9 @@ fn is_lisp_ident(name: &str) -> bool {
 }
 
 fn ensure_lisp_ident(name: &str, span: &Span, kind: &str) -> DslResult<String> {
-    if !is_lisp_ident(name) {
+    if !is_callable_ident(name) {
         return Err(Diag::new(format!(
-            "{} must be lowercase lisp-style (kebab-case)",
+            "{} must use valid identifier characters (letters, digits, and -_?!*+=<>$)",
             kind
         ))
         .with_span(span.clone()));
