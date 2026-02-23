@@ -33,6 +33,34 @@ cargo run -p dslc -- --feedback examples/ok.dsl
 
 Note: the compiler may emit warnings when it auto-clones values to avoid move errors.
 
+## LSP (Zed + VS Code)
+
+Install the language server binary:
+
+```bash
+cargo install --path crates/darcy-lsp
+```
+
+Zed:
+- This repo includes workspace config in `.zed/settings.json` that launches `darcy-lsp` for the `Darcy` language.
+- If `darcy-lsp` is not in `PATH`, replace the command with an absolute path.
+- See `extensions/zed/README.md`.
+
+VS Code:
+- A local extension client lives at `extensions/vscode`.
+- Setup:
+
+```bash
+cd extensions/vscode
+npm install
+```
+
+- Open `extensions/vscode` in VS Code and press `F5` to run an Extension Development Host.
+- The extension starts `darcy-lsp` over stdio for `.dsl` files.
+- Settings:
+  - `darcy.languageServer.path` (default `darcy-lsp`)
+  - `darcy.languageServer.args` (default `[]`)
+
 ## Language Snapshot
 
 Top-level forms:

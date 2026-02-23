@@ -1,0 +1,61 @@
+{
+  "name": "darcy-language",
+  "displayName": "Darcy Language",
+  "description": "Language support and LSP client for Darcy (.dsl)",
+  "version": "0.1.0",
+  "publisher": "darcy-lang",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:darcy"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Darcy",
+      "properties": {
+        "darcy.languageServer.path": {
+          "type": "string",
+          "default": "darcy-lsp",
+          "description": "Path to darcy-lsp binary"
+        },
+        "darcy.languageServer.args": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Arguments passed to darcy-lsp"
+        }
+      }
+    },
+    "languages": [
+      {
+        "id": "darcy",
+        "aliases": [
+          "Darcy",
+          "darcy"
+        ],
+        "extensions": [
+          ".dsl"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "darcy",
+        "scopeName": "source.darcy",
+        "path": "./syntaxes/darcy.tmLanguage.json"
+      }
+    ]
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}
