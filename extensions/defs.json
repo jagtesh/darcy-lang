@@ -55,7 +55,7 @@
     "usize",
     "isize",
     "string",
-    "keyword",
+    "symbol",
     "hashset",
     "imap",
     "hash-map",

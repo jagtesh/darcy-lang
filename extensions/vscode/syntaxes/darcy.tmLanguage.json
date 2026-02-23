@@ -88,7 +88,7 @@
       "patterns": [
         {
           "name": "storage.type.darcy",
-          "match": "(?:\\\\bbtree\\-map\\\\b|\\\\bhash\\-map\\\\b|\\\\bhashset\\\\b|\\\\bkeyword\\\\b|\\\\bstring\\\\b|\\\\bisize\\\\b|\\\\busize\\\\b|\\\\bbool\\\\b|\\\\bimap\\\\b|\\\\bf32\\\\b|\\\\bf64\\\\b|\\\\bi32\\\\b|\\\\bi64\\\\b|\\\\bu32\\\\b|\\\\bu64\\\\b|\\(\\))"
+          "match": "(?:\\\\bbtree\\-map\\\\b|\\\\bhash\\-map\\\\b|\\\\bhashset\\\\b|\\\\bstring\\\\b|\\\\bsymbol\\\\b|\\\\bisize\\\\b|\\\\busize\\\\b|\\\\bbool\\\\b|\\\\bimap\\\\b|\\\\bf32\\\\b|\\\\bf64\\\\b|\\\\bi32\\\\b|\\\\bi64\\\\b|\\\\bu32\\\\b|\\\\bu64\\\\b|\\(\\))"
         }
       ]
     },

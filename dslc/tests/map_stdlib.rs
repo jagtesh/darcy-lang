@@ -15,7 +15,7 @@ fn hashmap_brace_literal_lowers() {
     let src = "(defn main [] {:a 1 :b 2})";
     let out = compile(src).expect("compile ok");
     assert!(out.contains("darcy_stdlib::rt::IMap"), "{}", out);
-    assert!(out.contains("darcy_stdlib::rt::keyword"), "{}", out);
+    assert!(out.contains("darcy_stdlib::rt::symbol"), "{}", out);
     assert!(out.contains("insert"), "{}", out);
 }
 
@@ -44,7 +44,7 @@ fn btreemap_literal_lowers() {
 
 #[test]
 fn hashmap_get_contains_lowers() {
-    let src = "(defn main [m:hash-map<keyword,i32>] (darcy.hash-map/contains m :a))";
+    let src = "(defn main [m:hash-map<symbol,i32>] (darcy.hash-map/contains m :a))";
     let out = compile(src).expect("compile ok");
     assert!(out.contains("contains_key"), "{}", out);
 }

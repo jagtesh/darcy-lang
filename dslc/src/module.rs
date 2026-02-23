@@ -908,7 +908,7 @@ fn is_primitive_type(name: &str) -> bool {
             | "isize"
             | "()"
             | "string"
-            | "keyword"
+            | "symbol"
     )
 }
 

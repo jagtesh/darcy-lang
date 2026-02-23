@@ -882,7 +882,7 @@ fn lower_expr(
         Expr::Unit(_) => "()".to_string(),
         Expr::Keyword(s, _) => {
             let lit = format!("{:?}", s);
-            format!("darcy_stdlib::rt::keyword({})", lit)
+            format!("darcy_stdlib::rt::symbol({})", lit)
         }
         Expr::Pair { .. } => "/* invalid pair */".to_string(),
         Expr::Var(v, sp) => {
@@ -2273,12 +2273,12 @@ fn ty_rust(ty: &Ty, type_names: &BTreeMap<String, String>) -> String {
                     | "isize"
                     | "()"
                     | "string"
-                    | "keyword"
+                    | "symbol"
             ) {
                 if s == "string" {
                     "String".to_string()
-                } else if s == "keyword" {
-                    "darcy_stdlib::rt::Keyword".to_string()
+                } else if s == "symbol" {
+                    "darcy_stdlib::rt::Symbol".to_string()
                 } else {
                     s.clone()
                 }

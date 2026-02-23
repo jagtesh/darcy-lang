@@ -3890,7 +3890,7 @@ fn infer_expr_type_internal(
             })
         }
         Expr::Keyword(_, sp) => {
-            let ty = InferTy::Named("keyword".to_string());
+            let ty = InferTy::Named("symbol".to_string());
             let mut types = BTreeMap::new();
             types.insert(SpanKey::new(sp), ty.clone());
             Ok(InferExpr {

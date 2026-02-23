@@ -3,16 +3,16 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{Arc, LazyLock, Mutex, Weak};
 
-pub type Keyword = Arc<str>;
+pub type Symbol = Arc<str>;
 pub type IMap<K, V> = IndexMap<K, V>;
 
-static KEYWORD_INTERNER: LazyLock<Mutex<HashMap<String, Weak<str>>>> =
+static SYMBOL_INTERNER: LazyLock<Mutex<HashMap<String, Weak<str>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-pub fn keyword(name: &str) -> Keyword {
-    let mut interner = KEYWORD_INTERNER
+pub fn symbol(name: &str) -> Symbol {
+    let mut interner = SYMBOL_INTERNER
         .lock()
-        .expect("keyword interner lock poisoned");
+        .expect("symbol interner lock poisoned");
     if let Some(existing) = interner.get(name) {
         if let Some(upgraded) = existing.upgrade() {
             return upgraded;
