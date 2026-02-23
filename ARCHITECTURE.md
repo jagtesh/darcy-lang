@@ -12,8 +12,6 @@ Pipeline
 - Typecheck: `typecheck::typecheck_tops` builds a `TypecheckedProgram` with typed functions.
 - Ownership heuristics: inferred borrow-by-default signatures + auto-clone plan computed in `typecheck`.
 - Lowering: `lower::lower_program` converts the pipeline output into Rust source (applies borrow/auto-clone plan).
-- Feedback (optional): `feedback::{collect_feedback_hints, apply_feedback_hints}` runs rustc + rust-analyzer in
-  parallel on the first Rust output, merges inferred bounds, and re-lowers with refined generics.
 
 Entrypoints
 - Library API: `dslc::analyze` and `dslc::compile` in `dslc/src/lib.rs`.

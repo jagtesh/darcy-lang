@@ -25,12 +25,6 @@ cargo run -p dslc -- -L crates/darcy-stdlib/darcy examples/ok.dsl
 cargo run -p dslc -- -L crates/darcy-stdlib/darcy run examples/mnist.dsl --runtime
 ```
 
-Enable the feedback pass (two-stage emit + rustc diagnostics):
-
-```bash
-cargo run -p dslc -- --feedback examples/ok.dsl
-```
-
 Note: the compiler may emit warnings when it auto-clones values to avoid move errors.
 
 ## LSP (Zed + VS Code)
@@ -258,20 +252,11 @@ cargo run -p dslc --release --bin bench_typecheck -- --iters 10000 --save bench/
 flowchart TD
     A[Parse + expand] --> B[Typecheck]
     B --> C[Lower to Rust IR]
-    C --> D["Emit Rust (pass 1)"]
-    D --> E{--feedback?}
-    E -->|no| F["Emit Rust (final)"]
-    E -->|yes| G[cargo check + JSON diagnostics]
-    E -->|yes| H[rust-analyzer diagnostics]
-    G --> I[Feedback hints]
-    H --> I
-    I --> J[Apply hints to typed IR]
-    J --> K["Emit Rust (pass 2)"]
-    K --> F
+    C --> D[Emit Rust]
+    D --> E[Run or integrate into Cargo build]
 ```
 
-Rustc remains the source of truth for hard errors; RA provides additional type/trait insights even
-when code compiles.
+Rustc remains the source of truth for hard errors and generated output validation.
 
 ## Notes
 

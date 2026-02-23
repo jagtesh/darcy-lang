@@ -505,27 +505,14 @@ Return types are inferred from the body. For numeric ops, the left operand deter
 
 ## Compiler Pipeline
 
-The compiler uses a multi-stage pipeline with a feedback pass that combines rustc diagnostics and rust-analyzer semantic inference.
+The compiler uses a multi-stage pipeline:
 
 Stages:
 
 1. Parse + macro expansion
 2. Typecheck + borrow/move heuristics
 3. Lower to Rust IR
-4. Emit Rust (pass 1)
-5. Feedback (parallel):
-   - rustc diagnostics: `cargo check --message-format=json`
-   - rust-analyzer diagnostics via `load-cargo` + `ide::AnalysisHost`
-6. Merge feedback into `FeedbackHints` (rustc wins on conflicts)
-7. Re-lower + emit Rust (pass 2)
-
-Merge policy (deterministic):
-- rustc errors/warnings take precedence over RA hints
-- RA fills in missing trait bounds or expected types when rustc is silent
-- conflicts are resolved by keeping rustc-derived constraints
-
-This feedback stage is opt-in via `--feedback`. The RA pass can add trait bounds or expected types
-even when rustc is silent, improving polymorphism and type propagation without changing surface syntax.
+4. Emit Rust
 
 ## Builtins
 

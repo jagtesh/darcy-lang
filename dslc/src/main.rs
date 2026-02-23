@@ -3,19 +3,18 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use dslc::{compile_with_modules_opts, render_diag, render_diag_with_level, CompileOptions};
+use dslc::{compile_with_modules, render_diag, render_diag_with_level};
 
 fn main() {
     let args = env::args().skip(1).collect::<Vec<_>>();
     if args.is_empty() || args[0] == "-h" || args[0] == "--help" {
         eprintln!(
-            "dslc (MVP)\n\nUsage:\n  dslc [--lib <dir>] [--feedback] <input.dsl>\n  dslc [--lib <dir>] [--feedback] run <input.dsl> [--runtime]\n\nOptions:\n  --lib, -L <dir>   Add a module search path (repeatable)\n  --runtime         Use Cargo + darcy-runtime for interop (auto-detected)\n  --feedback        Run rustc feedback pass and re-emit Rust\n\nOutputs Rust to stdout, or compiles and runs with 'run'.\n"
+            "dslc (MVP)\n\nUsage:\n  dslc [--lib <dir>] <input.dsl>\n  dslc [--lib <dir>] run <input.dsl> [--runtime]\n\nOptions:\n  --lib, -L <dir>   Add a module search path (repeatable)\n  --runtime         Use Cargo + darcy-runtime for interop (auto-detected)\n\nOutputs Rust to stdout, or compiles and runs with 'run'.\n"
         );
         std::process::exit(2);
     }
     let mut run_mode = false;
     let mut runtime_mode = false;
-    let mut feedback_mode = false;
     let mut lib_paths: Vec<PathBuf> = Vec::new();
     let mut files: Vec<String> = Vec::new();
     let mut i = 0usize;
@@ -37,11 +36,11 @@ fn main() {
                 runtime_mode = true;
                 i += 1;
             }
-            "--feedback" => {
-                feedback_mode = true;
-                i += 1;
-            }
             _ => {
+                if args[i].starts_with('-') {
+                    eprintln!("error: unknown option '{}'", args[i]);
+                    std::process::exit(2);
+                }
                 files.push(args[i].clone());
                 i += 1;
             }
@@ -74,10 +73,7 @@ fn main() {
         }
     }
 
-    let opts = CompileOptions {
-        feedback: feedback_mode,
-    };
-    match compile_with_modules_opts(&input_path, &src, &search_paths, opts) {
+    match compile_with_modules(&input_path, &src, &search_paths) {
         Ok(output) => {
             for w in &output.warnings {
                 eprintln!("{}", render_diag_with_level(&file, &src, w, "warning"));
