@@ -45,10 +45,87 @@ pub fn render_diag_with_level(file: &str, src: &str, d: &Diag, level: &str) -> S
             file, sp.start.line, sp.start.col
         ));
         if let Some(line) = src.lines().nth(sp.start.line.saturating_sub(1)) {
-            s.push_str(&format!("  |\n{:>2} | {}\n  |", sp.start.line, line));
+            let width = sp.start.line.to_string().len();
+            let pad = " ".repeat(width);
+            s.push_str(&format!(
+                " {} |\n {:>width$} | {}\n {} |",
+                pad,
+                sp.start.line,
+                line,
+                pad,
+                width = width
+            ));
             let caret_pos = sp.start.col.saturating_sub(1);
-            s.push_str(&format!("\n  | {}^\n", " ".repeat(caret_pos)));
+            s.push_str(&format!("\n {} | {}^\n", pad, " ".repeat(caret_pos)));
         }
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diag_gutter_pipe_stays_aligned_single_digit() {
+        let src = "(def PI 3.14)\n";
+        let d = Diag::new("boom").with_span(Span {
+            start: Loc {
+                line: 1,
+                col: 6,
+                byte: 5,
+            },
+            end: Loc {
+                line: 1,
+                col: 8,
+                byte: 7,
+            },
+        });
+        let out = render_diag("x.dsl", src, &d);
+        let lines: Vec<&str> = out.lines().collect();
+        let i_blank = lines
+            .iter()
+            .position(|l| l.contains("|") && l.trim() == "|")
+            .unwrap();
+        let i_code = i_blank + 1;
+        let i_caret = i_blank + 2;
+        let p_blank = lines[i_blank].find('|').unwrap();
+        let p_code = lines[i_code].find('|').unwrap();
+        let p_caret = lines[i_caret].find('|').unwrap();
+        assert_eq!(p_blank, p_code);
+        assert_eq!(p_code, p_caret);
+    }
+
+    #[test]
+    fn diag_gutter_pipe_stays_aligned_multi_digit() {
+        let mut src = String::new();
+        for _ in 0..12 {
+            src.push_str("(noop)\n");
+        }
+        let d = Diag::new("boom").with_span(Span {
+            start: Loc {
+                line: 12,
+                col: 2,
+                byte: 0,
+            },
+            end: Loc {
+                line: 12,
+                col: 3,
+                byte: 0,
+            },
+        });
+        let out = render_diag("x.dsl", &src, &d);
+        let lines: Vec<&str> = out.lines().collect();
+        let i_blank = lines
+            .iter()
+            .position(|l| l.contains("|") && l.trim() == "|")
+            .unwrap();
+        let i_code = i_blank + 1;
+        let i_caret = i_blank + 2;
+        let p_blank = lines[i_blank].find('|').unwrap();
+        let p_code = lines[i_code].find('|').unwrap();
+        let p_caret = lines[i_caret].find('|').unwrap();
+        assert_eq!(p_blank, p_code);
+        assert_eq!(p_code, p_caret);
+    }
 }
