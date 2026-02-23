@@ -68,3 +68,11 @@ fn lowers_string_interpolation_in_println() {
         out
     );
 }
+
+#[test]
+fn println_accepts_record_directly_via_display() {
+    let src = "(defrecord user (name string)) (defn main [u:user] (darcy.fmt/println u))";
+    let out = compile(src).expect("compile ok");
+    assert!(out.contains("impl std::fmt::Display for User"), "{}", out);
+    assert!(out.contains("println!(\"{}\", u)"), "{}", out);
+}

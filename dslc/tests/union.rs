@@ -22,3 +22,11 @@ fn wildcard_match_ok() {
     let out = compile(src).expect("compile ok");
     assert!(out.contains("_ => 0"));
 }
+
+#[test]
+fn enum_generates_display_impl() {
+    let src = "(defenum state (on) (off)) (defn main [s:state] (darcy.fmt/println s))";
+    let out = compile(src).expect("compile ok");
+    assert!(out.contains("impl std::fmt::Display for State"), "{}", out);
+    assert!(out.contains("println!(\"{}\", s)"), "{}", out);
+}

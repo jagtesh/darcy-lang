@@ -60,6 +60,16 @@ pub fn lower_program(pipeline: &PipelineOutput) -> DslResult<String> {
                     ));
                 }
                 out.push_str("}\n\n");
+                out.push_str(&format!(
+                    "impl std::fmt::Display for {} {{\n",
+                    resolved.rust_name
+                ));
+                out.push_str(
+                    "    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n",
+                );
+                out.push_str("        write!(f, \"{:?}\", self)\n");
+                out.push_str("    }\n");
+                out.push_str("}\n\n");
             }
         }
         if let Top::Union(ud) = t {
@@ -108,6 +118,13 @@ pub fn lower_program(pipeline: &PipelineOutput) -> DslResult<String> {
                     out.push_str("    },\n");
                 }
             }
+            out.push_str("}\n\n");
+            out.push_str(&format!("impl std::fmt::Display for {} {{\n", ud.rust_name));
+            out.push_str(
+                "    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n",
+            );
+            out.push_str("        write!(f, \"{:?}\", self)\n");
+            out.push_str("    }\n");
             out.push_str("}\n\n");
         }
     }
