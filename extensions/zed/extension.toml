@@ -1,0 +1,11 @@
+id = "darcy"
+name = "Darcy"
+version = "0.1.0"
+schema_version = 1
+authors = ["Darcy Contributors"]
+description = "Darcy language support"
+repository = "https://github.com/jagtesh/darcy-lang"
+
+[grammars.darcy]
+repository = "https://github.com/6cdh/tree-sitter-scheme"
+rev = "b5c701148501fa056302827442b5b4956f1edc03"

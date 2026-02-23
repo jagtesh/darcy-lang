@@ -1,4 +1,12 @@
-# Darcy Zed Setup
+# Darcy Zed Extension
+
+This folder is a Zed dev extension (it includes `extension.toml` and `languages/darcy/config.toml`).
+
+Install it in Zed via:
+- `zed: extensions install dev extension`
+- Select: `/Volumes/Dev/code/jagtesh/darcy-lang/extensions/zed`
+
+After install, `.dsl` files map to language `Darcy`.
 
 Darcy LSP is configured through workspace settings in `.zed/settings.json`.
 

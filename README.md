@@ -42,6 +42,7 @@ cargo install --path crates/darcy-lsp
 ```
 
 Zed:
+- Install dev extension from `extensions/zed` (contains `extension.toml`).
 - This repo includes workspace config in `.zed/settings.json` that launches `darcy-lsp` for the `Darcy` language.
 - If `darcy-lsp` is not in `PATH`, replace the command with an absolute path.
 - See `extensions/zed/README.md`.
