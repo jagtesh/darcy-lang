@@ -6,6 +6,7 @@ use crate::typed::{GenericBound, ParamMode, SpanKey, TypedFn};
 use crate::PipelineOutput;
 
 const ALLOW_LINTS: &[&str] = &[
+    // Keep dslc/tests/compile.rs expected header in sync with this list.
     "dead_code",
     "unused_parens",
     "clippy::redundant_pattern",
