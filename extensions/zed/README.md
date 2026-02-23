@@ -8,6 +8,7 @@ Install it in Zed via:
 
 After install, `.dsl` files map to language `Darcy`.
 The current grammar backend is `tree-sitter-scheme`, so extension config uses grammar id `scheme`.
+Syntax highlighting rules are in `languages/darcy/highlights.scm`.
 
 Darcy LSP is configured through workspace settings in `.zed/settings.json`.
 
